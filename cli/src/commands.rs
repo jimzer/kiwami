@@ -28,6 +28,22 @@ pub fn all() -> Vec<Entry> {
         });
     }
 
+    // Also reachable from the power menu (SUPER+SHIFT+P); offered here so the
+    // launcher is a single place to reach anything.
+    for (label, argv) in [
+        ("Lock", vec!["hyprlock"]),
+        ("Suspend", vec!["systemctl", "suspend"]),
+        ("Log out", vec!["hyprctl", "dispatch", "exit"]),
+        ("Reboot", vec!["systemctl", "reboot"]),
+        ("Shut down", vec!["systemctl", "poweroff"]),
+    ] {
+        out.push(Entry {
+            name: format!("Power: {label}"),
+            description: String::new(),
+            exec: argv.into_iter().map(String::from).collect(),
+        });
+    }
+
     out.push(Entry {
         name: "Shell: restart".into(),
         description: "Restart the Kiwami shell".into(),

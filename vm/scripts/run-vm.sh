@@ -34,6 +34,11 @@ args=(
   -drive "if=pflash,format=raw,file=$VARS"
   -drive "file=$DISK,if=virtio,format=qcow2,discard=unmap"
   -device virtio-gpu-pci
+  # A sound card with no host output: the guest gets a real PipeWire sink so
+  # the volume OSD is testable, without QEMU grabbing the Mac's audio.
+  -audiodev none,id=snd0
+  -device intel-hda
+  -device hda-duplex,audiodev=snd0
   -device qemu-xhci -device usb-kbd -device usb-tablet
   -netdev "user,id=n0,hostfwd=tcp::${SSH_PORT}-:22"
   -device virtio-net-pci,netdev=n0

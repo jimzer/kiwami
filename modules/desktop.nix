@@ -40,6 +40,9 @@
 
   environment.systemPackages = with pkgs; [
     ghostty
+    hyprlock          # the locker; the shell must never draw its own
+    wireplumber       # wpctl, for the volume binds
+    brightnessctl     # no backlight in the VM, present for real hardware
     wl-clipboard
     grim
     slurp
@@ -49,6 +52,10 @@
     nerd-fonts.jetbrains-mono
     noto-fonts
   ];
+
+  # Battery and power-profile data for the bar. No battery in the VM, so the
+  # widget stays hidden there; this is for real hardware.
+  services.upower.enable = true;
 
   security.polkit.enable = true;
   services.dbus.enable = true;

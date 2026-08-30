@@ -108,9 +108,16 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
       `update`, `rollback`, `doctor`
 - [ ] **`kiwami doctor`** — strays in `~/.local/bin`, `npm -g`, `cargo install`,
       and `nix profile list` must be empty (declarative-only invariant)
-- [ ] **Power menu** — five exec lines, disproportionate payoff
-- [ ] **Tray** — you will miss it on day two
-- [ ] **Audio / brightness OSD** + battery
+- [x] **Power menu** — lock/suspend/logout/reboot/shutdown, `SUPER+SHIFT+P`,
+      keyboard and mouse nav; also offered in the launcher via the CLI
+- [x] **Tray** — StatusNotifierItem, left-click activates, right-click menu.
+      Empty in the VM because nothing registers an icon there
+- [x] **Audio OSD** — reacts to PipeWire state rather than being told to
+      appear, so it also shows when something else changes the volume. Verified
+      against a real sink (QEMU now gives the VM an HDA card)
+- [~] **Brightness OSD / battery** — written and wired, but *unverified*: the
+      VM has no backlight and no battery, so both paths only prove they hide
+      cleanly. Needs real hardware.
 
 ## Tier 3 — Differentiators
 

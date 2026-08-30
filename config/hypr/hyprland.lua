@@ -48,6 +48,15 @@ hl.bind(mod .. " + SHIFT + E", hl.dsp.exit())
 -- Toggle the launcher. The shell registers a GlobalShortcut under
 -- appid "kiwami", so the compositor forwards the key to it.
 hl.bind(mod .. " + SPACE", hl.dsp.global("kiwami:launcher"))
+hl.bind(mod .. " + SHIFT + P", hl.dsp.global("kiwami:power"))
+
+-- Media and brightness keys. These only change the state; the shell's OSD
+-- watches PipeWire and appears on its own, so nothing has to tell it to.
+hl.bind("XF86AudioRaiseVolume", hl.dsp.exec_cmd("wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+"), { repeating = true })
+hl.bind("XF86AudioLowerVolume", hl.dsp.exec_cmd("wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"), { repeating = true })
+hl.bind("XF86AudioMute", hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"))
+hl.bind("XF86MonBrightnessUp", hl.dsp.exec_cmd("brightnessctl set +5%"), { repeating = true })
+hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("brightnessctl set 5%-"), { repeating = true })
 
 -- Workspaces
 for i = 1, 9 do

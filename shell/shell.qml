@@ -8,4 +8,6 @@ ShellRoot {
     }
 
     Launcher {}
+    PowerMenu {}
+    Osd {}
 }

@@ -77,6 +77,16 @@ moves when `flake.lock` says, not when upstream pushes.
 
 **Hyprland is configured in Lua** (v0.55+), not `hyprland.conf`.
 
+## Keybinds
+
+| | |
+|---|---|
+| `SUPER+RETURN` | terminal |
+| `SUPER+SPACE` | launcher (apps + `kiwami` commands) |
+| `SUPER+SHIFT+P` | power menu |
+| `SUPER+1..9` | workspaces |
+| `XF86Audio*` / `XF86MonBrightness*` | volume and brightness, with OSD |
+
 ## Session services
 
 Hyprland is launched through UWSM so `graphical-session.target` actually

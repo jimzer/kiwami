@@ -64,13 +64,22 @@ PanelWindow {
         precision: SystemClock.Seconds
     }
 
-    Text {
+    Row {
         anchors.right: parent.right
         anchors.rightMargin: Theme.gap
         anchors.verticalCenter: parent.verticalCenter
-        text: Qt.formatDateTime(clock.date, "ddd d MMM  HH:mm:ss")
-        color: Theme.fg
-        font.family: Theme.font
-        font.pixelSize: Theme.fontSize
+        spacing: Theme.gap * 2
+
+        Tray { anchors.verticalCenter: parent.verticalCenter }
+
+        Battery { anchors.verticalCenter: parent.verticalCenter }
+
+        Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: Qt.formatDateTime(clock.date, "ddd d MMM  HH:mm:ss")
+            color: Theme.fg
+            font.family: Theme.font
+            font.pixelSize: Theme.fontSize
+        }
     }
 }
