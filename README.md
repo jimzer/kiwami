@@ -39,6 +39,8 @@ just vm gui          # boot it in a window
 just vm ssh 'uname -a'
 just vm screenshot bar
 just vm rebuild      # push the flake and nixos-rebuild switch
+just vm reload       # push configs and hyprctl reload — no rebuild
+just vm hyprctl clients
 ```
 
 Requires `just >= 1.31` (modules), QEMU, and Nix on the host for

@@ -52,7 +52,7 @@ status:
 # Copy the flake into the guest at ~/kiwami
 # COPYFILE_DISABLE stops macOS tar emitting AppleDouble "._" files.
 push:
-    @cd .. && COPYFILE_DISABLE=1 tar cf - flake.nix flake.lock hosts modules \
+    @cd .. && COPYFILE_DISABLE=1 tar --no-xattrs -cf - flake.nix flake.lock hosts modules config \
         | ./vm/scripts/vmssh 'rm -rf ~/kiwami && mkdir -p ~/kiwami && tar xf - -C ~/kiwami'
     @./scripts/vmssh 'find ~/kiwami -type f | sort | sed "s|/home/nixos/kiwami/|  |"'
 
@@ -93,6 +93,25 @@ expect +TEXT:
 # Send a single keystroke via QMP:  just key ctrl-alt-f2
 key +KEYS:
     @python3 scripts/qmp.py key {{KEYS}}
+
+# --- desktop -----------------------------------------------------------
+
+# Run hyprctl in the guest (resolves the instance signature for you)
+hyprctl +ARGS:
+    @./scripts/vmssh 'export XDG_RUNTIME_DIR=/run/user/1000; \
+        export HYPRLAND_INSTANCE_SIGNATURE=$(ls /run/user/1000/hypr/ 2>/dev/null | head -1); \
+        hyprctl {{ARGS}}'
+
+# Push the working tree and hot-reload Hyprland. No rebuild: the config is an
+# out-of-store symlink, so this is the whole edit->see-it loop.
+reload: push
+    @./scripts/vmssh 'export XDG_RUNTIME_DIR=/run/user/1000; \
+        export HYPRLAND_INSTANCE_SIGNATURE=$(ls /run/user/1000/hypr/ 2>/dev/null | head -1); \
+        hyprctl reload'
+
+# Restart the Hyprland session (greetd)
+restart-session:
+    @./scripts/vmssh 'sudo systemctl restart greetd' && echo "session restarted"
 
 # --- observing ---------------------------------------------------------
 

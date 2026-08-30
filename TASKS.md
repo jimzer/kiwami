@@ -66,6 +66,10 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 - [x] Public repo at github.com/jimzer/kiwami — `nixos-install --flake
       github:jimzer/kiwami#<host>` verified to produce the same derivation as
       the local tree
+- [x] Hyprland 0.55.4 autostarting via greetd in the VM, config in Lua
+- [x] `mkOutOfStoreSymlink` wiring — `~/.config/hypr` resolves to the working
+      tree, so `just vm reload` is edit -> `hyprctl reload`, no rebuild
+- [x] Home Manager wired as the package/dotfile layer only
 - [ ] `hosts/desktop/`
 - [ ] `mkOutOfStoreSymlink` wiring for the live QML/Hyprland checkout
 - [ ] Home Manager as **package layer only** (`home.packages`, git, ssh, direnv)

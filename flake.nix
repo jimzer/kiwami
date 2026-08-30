@@ -18,14 +18,21 @@
     };
   };
 
-  outputs = { self, nixpkgs, ... }@inputs:
+  outputs = { self, nixpkgs, home-manager, ... }@inputs:
     let
       mkHost = system: modules:
         nixpkgs.lib.nixosSystem {
           inherit system;
           # Makes every flake input reachable inside modules as `inputs.*`.
           specialArgs = { inherit inputs; };
-          modules = modules;
+          modules = modules ++ [
+            home-manager.nixosModules.home-manager
+            {
+              home-manager.useGlobalPkgs = true;
+              home-manager.useUserPackages = true;
+              home-manager.extraSpecialArgs = { inherit inputs; };
+            }
+          ];
         };
     in
     {

@@ -5,7 +5,14 @@
   imports = [
     ./hardware-configuration.nix
     ../../modules/common.nix
+    ../../modules/desktop.nix
   ];
+
+  # Home Manager: package layer and dotfile links only, per the design note.
+  home-manager.users.nixos = {
+    imports = [ ../../modules/home/hyprland.nix ];
+    home.stateVersion = "26.05";
+  };
 
   networking.hostName = "kiwami-vm";
 

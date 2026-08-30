@@ -44,15 +44,15 @@ step "pushing the flake to the installer"
 # Transfer is chunked base64 over the serial line: a tty in canonical mode
 # truncates lines past ~4096 bytes, and one line per file would exceed that.
 B64=$(cd "$VM_DIR/.." && COPYFILE_DISABLE=1 tar --no-xattrs -czf - \
-        flake.nix flake.lock hosts modules | base64 | tr -d '\n')
+        flake.nix flake.lock hosts modules config | base64 | tr -d '\n')
 echo "    payload: ${#B64} chars"
 $CONSOLE run 'rm -rf /tmp/kiwami && mkdir -p /tmp/kiwami && rm -f /tmp/k.b64' >/dev/null
 for (( i=0; i<${#B64}; i+=2500 )); do
   $CONSOLE run "printf '%s' '${B64:$i:2500}' >> /tmp/k.b64" >/dev/null
 done
 $CONSOLE run 'base64 -d /tmp/k.b64 | tar xzf - -C /tmp/kiwami' >/dev/null
-LOCAL_SUM=$(cd "$VM_DIR/.." && cat flake.nix flake.lock hosts/vm-aarch64/*.nix modules/*.nix | shasum | cut -d' ' -f1)
-REMOTE_SUM=$($CONSOLE run 'cat /tmp/kiwami/flake.nix /tmp/kiwami/flake.lock /tmp/kiwami/hosts/vm-aarch64/*.nix /tmp/kiwami/modules/*.nix | sha1sum | cut -d" " -f1' | tr -d '[:space:]')
+LOCAL_SUM=$(cd "$VM_DIR/.." && cat flake.nix flake.lock hosts/vm-aarch64/*.nix modules/*.nix modules/home/*.nix config/hypr/* | shasum | cut -d' ' -f1)
+REMOTE_SUM=$($CONSOLE run 'cat /tmp/kiwami/flake.nix /tmp/kiwami/flake.lock /tmp/kiwami/hosts/vm-aarch64/*.nix /tmp/kiwami/modules/*.nix /tmp/kiwami/modules/home/*.nix /tmp/kiwami/config/hypr/* | sha1sum | cut -d" " -f1' | tr -d '[:space:]')
 [[ "$LOCAL_SUM" == "$REMOTE_SUM" ]] || { echo "flake transfer corrupted ($LOCAL_SUM != $REMOTE_SUM)"; exit 1; }
 echo "    checksum ok"
 
@@ -69,6 +69,12 @@ for _ in $(seq 1 60); do
   printf '    still installing...\n'
 done
 $CONSOLE run 'grep -q "installation finished" /tmp/install.log' >/dev/null || { echo "install failed:"; $CONSOLE run 'tail -25 /tmp/install.log'; exit 1; }
+
+step "placing the repo in the user's home"
+# modules/home/hyprland.nix symlinks ~/.config/hypr into ~/kiwami/config, so
+# the repo must exist there on first boot or the link dangles.
+$CONSOLE run 'mkdir -p /mnt/home/nixos/kiwami && cp -r /tmp/kiwami/. /mnt/home/nixos/kiwami/ && nixos-enter --root /mnt -- chown -R nixos:users /home/nixos/kiwami' >/dev/null
+echo "    ~/kiwami placed"
 
 step "seeding ssh key"
 [[ -f "$KEY" ]] || ssh-keygen -t ed25519 -N '' -C kiwami-vm -f "$KEY" >/dev/null
