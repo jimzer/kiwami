@@ -35,6 +35,10 @@ hl.bind(mod .. " + RETURN", hl.dsp.exec_cmd("ghostty"))
 hl.bind(mod .. " + Q", hl.dsp.window.close())
 hl.bind(mod .. " + SHIFT + E", hl.dsp.exit())
 
+-- Toggle the launcher. The shell registers a GlobalShortcut under
+-- appid "kiwami", so the compositor forwards the key to it.
+hl.bind(mod .. " + SPACE", hl.dsp.global("kiwami:launcher"))
+
 -- Workspaces
 for i = 1, 9 do
   hl.bind(mod .. " + " .. i, hl.dsp.focus({ workspace = i }))

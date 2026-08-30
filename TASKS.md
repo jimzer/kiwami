@@ -94,10 +94,12 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 
 ## Tier 1 — The product
 
-- [~] **Bar** — Quickshell renders a top panel with a static clock. Still to do:
-      live clock, workspaces, focused window, top/bottom as one setting
-- [ ] **Launcher** — `DesktopEntries` + filter + Enter (~80 lines)
-- [ ] **Theme pipeline** — one `colors.toml` feeding Hyprland + QML + kitty.
+- [x] **Bar** — workspaces (live from Hyprland IPC, clickable), focused window
+      title, running clock. Still to do: top/bottom as one setting
+- [x] **Launcher** — `DesktopEntries`, prefix-first filtering, keyboard nav,
+      `SUPER+SPACE` via a Hyprland global shortcut
+- [~] **Theme pipeline** — `shell/Theme.qml` is the single source for the QML
+      side. Still to do: one file feeding Hyprland + QML + Ghostty together.
       *Do this before the third widget or it becomes a retrofit.*
 - [ ] **`kiwami` CLI** — `update`, `rollback`, `doctor` only
 - [ ] **`kiwami doctor`** — strays in `~/.local/bin`, `npm -g`, `cargo install`,
