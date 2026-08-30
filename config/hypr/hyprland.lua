@@ -45,6 +45,12 @@ hl.bind(mod .. " + RETURN", hl.dsp.exec_cmd("ghostty"))
 hl.bind(mod .. " + Q", hl.dsp.window.close())
 hl.bind(mod .. " + SHIFT + E", hl.dsp.exit())
 
+-- Escape hatch. The shell is a systemd unit with Restart=always, but a QML
+-- error can leave it flapping or up-with-no-bar. This is bound in the
+-- compositor, so it works even when the shell is completely gone.
+hl.bind(mod .. " + SHIFT + R",
+  hl.dsp.exec_cmd("systemctl --user restart kiwami-shell.service"))
+
 -- Toggle the launcher. The shell registers a GlobalShortcut under
 -- appid "kiwami", so the compositor forwards the key to it.
 hl.bind(mod .. " + SPACE", hl.dsp.global("kiwami:launcher"))
