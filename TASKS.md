@@ -120,6 +120,13 @@ variants · anything requiring other people to adopt it
 
 ## Known debt
 
+- **`graphical-session.target` is inactive.** `start-hyprland` sets up dbus,
+  exports `WAYLAND_DISPLAY`, and starts the portals, but does not activate the
+  target that user units bind to via `WantedBy=graphical-session.target`.
+  Fine while the shell is launched with `hl.on("hyprland.start", ...)`; must be
+  fixed (probably `programs.uwsm.enable` + `programs.hyprland.withUWSM`) before
+  running Quickshell as a systemd user service.
+
 - `hardware-configuration.nix` for the VM mounts **by label**, not UUID, because
   `just vm install` reformats and mkfs generates new UUIDs each time. Real
   hardware must use the generated UUIDs.

@@ -51,8 +51,8 @@ for (( i=0; i<${#B64}; i+=2500 )); do
   $CONSOLE run "printf '%s' '${B64:$i:2500}' >> /tmp/k.b64" >/dev/null
 done
 $CONSOLE run 'base64 -d /tmp/k.b64 | tar xzf - -C /tmp/kiwami' >/dev/null
-LOCAL_SUM=$(cd "$VM_DIR/.." && cat flake.nix flake.lock hosts/vm-aarch64/*.nix modules/*.nix modules/home/*.nix config/hypr/* | shasum | cut -d' ' -f1)
-REMOTE_SUM=$($CONSOLE run 'cat /tmp/kiwami/flake.nix /tmp/kiwami/flake.lock /tmp/kiwami/hosts/vm-aarch64/*.nix /tmp/kiwami/modules/*.nix /tmp/kiwami/modules/home/*.nix /tmp/kiwami/config/hypr/* | sha1sum | cut -d" " -f1' | tr -d '[:space:]')
+LOCAL_SUM=$(cd "$VM_DIR/.." && cat flake.nix flake.lock hosts/vm-aarch64/*.nix modules/*.nix modules/home/*.nix config/*/* | shasum | cut -d' ' -f1)
+REMOTE_SUM=$($CONSOLE run 'cat /tmp/kiwami/flake.nix /tmp/kiwami/flake.lock /tmp/kiwami/hosts/vm-aarch64/*.nix /tmp/kiwami/modules/*.nix /tmp/kiwami/modules/home/*.nix /tmp/kiwami/config/*/* | sha1sum | cut -d" " -f1' | tr -d '[:space:]')
 [[ "$LOCAL_SUM" == "$REMOTE_SUM" ]] || { echo "flake transfer corrupted ($LOCAL_SUM != $REMOTE_SUM)"; exit 1; }
 echo "    checksum ok"
 

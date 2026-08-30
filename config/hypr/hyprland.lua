@@ -31,7 +31,7 @@ hl.config {
 
 -- Escape hatches. These must exist before anything fancy does: if the shell
 -- crashes, this is how you get a terminal back.
-hl.bind(mod .. " + RETURN", hl.dsp.exec_cmd("kitty"))
+hl.bind(mod .. " + RETURN", hl.dsp.exec_cmd("ghostty"))
 hl.bind(mod .. " + Q", hl.dsp.window.close())
 hl.bind(mod .. " + SHIFT + E", hl.dsp.exit())
 

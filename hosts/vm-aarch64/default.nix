@@ -10,7 +10,7 @@
 
   # Home Manager: package layer and dotfile links only, per the design note.
   home-manager.users.nixos = {
-    imports = [ ../../modules/home/hyprland.nix ];
+    imports = [ ../../modules/home/dotfiles.nix ];
     home.stateVersion = "26.05";
   };
 

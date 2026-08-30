@@ -6,20 +6,25 @@
 
   # Autologin straight into Hyprland: the VM must reach a desktop with no
   # interaction so the agent harness can screenshot it.
+  #
+  # Launch via start-hyprland, not the Hyprland binary directly. The wrapper
+  # sets up the dbus/systemd user session; calling the binary raises
+  # "started without start-hyprland" and leaves session services unreliable,
+  # which matters as soon as the shell needs the session bus.
   services.greetd = {
     enable = true;
     settings.initial_session = {
-      command = "${pkgs.hyprland}/bin/Hyprland";
+      command = "${pkgs.hyprland}/bin/start-hyprland";
       user = "nixos";
     };
     settings.default_session = {
-      command = "${pkgs.hyprland}/bin/Hyprland";
+      command = "${pkgs.hyprland}/bin/start-hyprland";
       user = "nixos";
     };
   };
 
   environment.systemPackages = with pkgs; [
-    kitty
+    ghostty
     wl-clipboard
     grim
     slurp

@@ -1,0 +1,17 @@
+# Kiwami Ghostty configuration.
+# Plain config file — edit and restart the terminal, no rebuild.
+
+font-family = JetBrainsMono Nerd Font
+font-size = 11
+
+window-padding-x = 10
+window-padding-y = 8
+window-decoration = false
+
+# Hyprland draws the borders; let the terminal stay flat.
+background-opacity = 1.0
+cursor-style = block
+confirm-close-surface = false
+
+# Keep the scrollback useful for reading build output.
+scrollback-limit = 100000
