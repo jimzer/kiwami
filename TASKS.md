@@ -41,8 +41,13 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 - (?) **Quickshell: from scratch vs fork.** Building from scratch is the stated
   goal; forking a public config to restyle is far faster. Possible split: fork to
   learn, rewrite once the API is familiar.
-- (?) **Impermanence now or later.** Adopting later is an afternoon *if* the
-  persist list is tracked as we go. Track it from day one regardless.
+- (?) **Impermanence: rehearse in the VM before the desktop is daily-driven.**
+  Not "someday". The version that solves the actual goal (no accumulated junk in
+  `$HOME`) is the one that wipes home too, so the persist list has to be right.
+  The VM is disposable and reinstalls in ~3 min, so a forgotten path costs
+  nothing there and everything on real hardware. Get the list right in the VM,
+  then carry a proven list over. Pair it with the btrfs pristine-root diff so
+  "what did I forget" is a list you read, not a guess.
 - (?) **Dictation STT** — local whisper.cpp vs an API. Affects latency and
   whether the GPU matters.
 
@@ -89,7 +94,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 
 ## Tier 1 — The product
 
-- [ ] **Bar** — workspaces, clock, focused window; top/bottom as one setting
+- [~] **Bar** — Quickshell renders a top panel with a static clock. Still to do:
+      live clock, workspaces, focused window, top/bottom as one setting
 - [ ] **Launcher** — `DesktopEntries` + filter + Enter (~80 lines)
 - [ ] **Theme pipeline** — one `colors.toml` feeding Hyprland + QML + kitty.
       *Do this before the third widget or it becomes a retrofit.*

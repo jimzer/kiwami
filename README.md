@@ -39,7 +39,8 @@ just vm gui          # boot it in a window
 just vm ssh 'uname -a'
 just vm screenshot bar
 just vm rebuild      # push the flake and nixos-rebuild switch
-just vm reload       # push configs and hyprctl reload — no rebuild
+just vm reload       # push, reload Hyprland, restart the shell — no rebuild
+just vm shell-log    # journal for the shell unit
 just vm hyprctl clients
 ```
 

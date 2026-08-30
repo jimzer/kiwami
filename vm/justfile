@@ -51,9 +51,15 @@ status:
 
 # Copy the flake into the guest at ~/kiwami
 # COPYFILE_DISABLE stops macOS tar emitting AppleDouble "._" files.
+# Staged then rsync'd rather than `rm -rf && extract`: the configs are
+# out-of-store symlinks into this tree, so deleting it makes them dangle. A
+# compositor or shell that reloads during that window reads a missing file.
 push:
-    @cd .. && COPYFILE_DISABLE=1 tar --no-xattrs -cf - flake.nix flake.lock hosts modules config \
-        | ./vm/scripts/vmssh 'rm -rf ~/kiwami && mkdir -p ~/kiwami && tar xf - -C ~/kiwami'
+    @cd .. && COPYFILE_DISABLE=1 tar --no-xattrs -cf - flake.nix flake.lock hosts modules config shell \
+        | ./vm/scripts/vmssh 'rm -rf ~/.kiwami-staging && mkdir -p ~/.kiwami-staging ~/kiwami \
+            && tar xf - -C ~/.kiwami-staging \
+            && rsync -a --delete ~/.kiwami-staging/ ~/kiwami/ \
+            && rm -rf ~/.kiwami-staging'
     @./scripts/vmssh 'find ~/kiwami -type f | sort | sed "s|/home/nixos/kiwami/|  |"'
 
 # Push, then nixos-rebuild switch inside the guest
@@ -96,17 +102,33 @@ key +KEYS:
 
 # --- desktop -----------------------------------------------------------
 
-# Run hyprctl in the guest (resolves the instance signature for you)
+# Run hyprctl in the guest. The signature comes from the systemd user
+# environment, which is what UWSM finalizes it into. The other candidates are
+# both wrong: /run/user/*/hypr keeps stale dirs from previous sessions, and
+# the compositor's own /proc environ holds the value it INHERITED at exec,
+# before it published the real one.
 hyprctl +ARGS:
     @./scripts/vmssh 'export XDG_RUNTIME_DIR=/run/user/1000; \
-        export HYPRLAND_INSTANCE_SIGNATURE=$(ls /run/user/1000/hypr/ 2>/dev/null | head -1); \
+        export HYPRLAND_INSTANCE_SIGNATURE=$(systemctl --user show-environment \
+            | sed -n "s/^HYPRLAND_INSTANCE_SIGNATURE=//p"); \
         hyprctl {{ARGS}}'
 
-# Push the working tree and hot-reload Hyprland. No rebuild: the config is an
-# out-of-store symlink, so this is the whole edit->see-it loop.
-reload: push
+# Restart the shell. Required after a push: the file watcher is disabled on
+# purpose, so the shell only picks up a tree we know is complete.
+restart-shell:
     @./scripts/vmssh 'export XDG_RUNTIME_DIR=/run/user/1000; \
-        export HYPRLAND_INSTANCE_SIGNATURE=$(ls /run/user/1000/hypr/ 2>/dev/null | head -1); \
+        systemctl --user restart kiwami-shell.service' && echo "shell restarted"
+
+# Shell logs
+shell-log N="30":
+    @./scripts/vmssh 'journalctl --user -u kiwami-shell.service --no-pager -n {{N}}'
+
+# Push the working tree, reload Hyprland and restart the shell. No rebuild:
+# configs are out-of-store symlinks, so this is the whole edit->see-it loop.
+reload: push restart-shell
+    @./scripts/vmssh 'export XDG_RUNTIME_DIR=/run/user/1000; \
+        export HYPRLAND_INSTANCE_SIGNATURE=$(systemctl --user show-environment \
+            | sed -n "s/^HYPRLAND_INSTANCE_SIGNATURE=//p"); \
         hyprctl reload'
 
 # Restart the Hyprland session (greetd)
