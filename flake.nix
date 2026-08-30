@@ -113,7 +113,27 @@
               # and exported the environment.
               machine.wait_until_succeeds("pgrep -f 'quickshell -p'", timeout=120)
 
-              machine.succeed("su nixos -c 'XDG_RUNTIME_DIR=/run/user/1000 kiwami theme list' | grep -q kiwami")
+              # Themes must resolve without a checkout: they come from
+              # /etc/kiwami/themes on an installed machine.
+              machine.succeed(
+                  "su nixos -c 'KIWAMI_REPO=/nonexistent kiwami theme list' | grep -q kiwami"
+              )
+
+              # Stronger than a screenshot: ask the compositor whether the
+              # shell actually mapped a layer surface. A process being alive
+              # only proves it started, not that it drew anything.
+              machine.wait_until_succeeds(
+                  "su nixos -c '"
+                  "export XDG_RUNTIME_DIR=/run/user/1000; "
+                  "export HYPRLAND_INSTANCE_SIGNATURE=$(systemctl --user show-environment "
+                  "| sed -n s/^HYPRLAND_INSTANCE_SIGNATURE=//p); "
+                  "hyprctl layers' | grep -q quickshell",
+                  timeout=120,
+              )
+
+              # Let the first frame land before capturing, or the screenshot is
+              # a blank framebuffer that still passes every assertion above.
+              machine.sleep(5)
               machine.screenshot("desktop")
             '';
           };
