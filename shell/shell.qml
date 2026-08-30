@@ -10,4 +10,5 @@ ShellRoot {
     Launcher {}
     PowerMenu {}
     Osd {}
+    Notifications {}
 }

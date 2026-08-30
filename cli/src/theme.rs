@@ -29,13 +29,23 @@ impl Palette {
     }
 }
 
+/// Themes from every search path, deduplicated - a name present in the working
+/// tree shadows the system copy rather than appearing twice.
 pub fn list() -> std::io::Result<Vec<String>> {
-    let dir = paths::themes_dir();
-    let mut names: Vec<String> = fs::read_dir(&dir)?
-        .filter_map(|e| e.ok())
-        .filter(|e| e.path().join("colors.json").is_file())
-        .filter_map(|e| e.file_name().into_string().ok())
-        .collect();
+    let mut names: Vec<String> = Vec::new();
+    for dir in paths::theme_search_paths() {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for e in entries.flatten() {
+            if !e.path().join("colors.json").is_file() {
+                continue;
+            }
+            if let Ok(name) = e.file_name().into_string() {
+                if !names.contains(&name) {
+                    names.push(name);
+                }
+            }
+        }
+    }
     names.sort();
     Ok(names)
 }
@@ -52,11 +62,14 @@ pub fn set(name: Option<String>) -> Result<String, String> {
         .or_else(current)
         .unwrap_or_else(|| "kiwami".to_string());
 
-    let src = paths::themes_dir().join(&name);
+    let src = paths::find_theme(&name).ok_or_else(|| {
+        let tried: Vec<String> = paths::theme_search_paths()
+            .iter()
+            .map(|p| p.join(&name).display().to_string())
+            .collect();
+        format!("no such theme: {name}\n  looked in:\n    {}", tried.join("\n    "))
+    })?;
     let palette_path = src.join("colors.json");
-    if !palette_path.is_file() {
-        return Err(format!("no such theme: {name} ({})", palette_path.display()));
-    }
 
     let raw = fs::read_to_string(&palette_path).map_err(|e| e.to_string())?;
     let palette: Palette = serde_json::from_str(&raw)

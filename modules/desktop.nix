@@ -43,6 +43,7 @@
     hyprlock          # the locker; the shell must never draw its own
     wireplumber       # wpctl, for the volume binds
     brightnessctl     # no backlight in the VM, present for real hardware
+    libnotify         # notify-send, and what most apps link against
     wl-clipboard
     grim
     slurp
@@ -56,6 +57,11 @@
   # Battery and power-profile data for the bar. No battery in the VM, so the
   # widget stays hidden there; this is for real hardware.
   services.upower.enable = true;
+
+  # Themes ship with the system so an installed machine has them without a
+  # checkout. `kiwami` still prefers ~/kiwami/config/themes when it exists, so
+  # editing a theme live keeps working.
+  environment.etc."kiwami/themes".source = ../config/themes;
 
   security.polkit.enable = true;
   services.dbus.enable = true;

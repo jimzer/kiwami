@@ -71,9 +71,9 @@ fn main() -> std::process::ExitCode {
                             println!("{marker} {n}");
                         }
                     }
-                    Ok(_) => eprintln!("no themes found in {}", paths::themes_dir().display()),
+                    Ok(_) => eprintln!("no themes found in any of {:?}", paths::theme_search_paths()),
                     Err(e) => {
-                        eprintln!("cannot read {}: {e}", paths::themes_dir().display());
+                        eprintln!("cannot read themes: {e}");
                         return std::process::ExitCode::FAILURE;
                     }
                 }

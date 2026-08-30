@@ -3,7 +3,7 @@
 # Why a unit rather than exec-ing it from Hyprland: Restart=always, real journal
 # logs, and `systemctl --user restart kiwami-shell` as a clean restart to pair
 # with the disabled file watcher. See docs/session-services.md.
-{ config, pkgs, lib, ... }:
+{ config, pkgs, lib, inputs, ... }:
 
 let
   # nixpkgs' quickshell (0.3.0) is in the binary cache for aarch64; the upstream
@@ -12,12 +12,22 @@ let
   # only give up tracking master. Switch to
   # `inputs.quickshell.packages.${pkgs.system}.default` when we need newer.
   quickshell = pkgs.quickshell;
+  kiwami = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.kiwami;
 
   # The shell tree lives in the working copy so edits are live.
   shellDir = "%h/kiwami/shell";
 in
 {
   home.packages = [ quickshell ];
+
+  # A freshly installed machine has no applied theme, so Hyprland and Ghostty
+  # would come up with no colours at all until someone ran the command by hand.
+  # Only runs when nothing is applied yet, so it never overrides a choice.
+  home.activation.kiwamiDefaultTheme = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    if [ ! -e "$HOME/.local/state/kiwami/current/theme.name" ]; then
+      $DRY_RUN_CMD ${lib.getExe kiwami} theme set kiwami || true
+    fi
+  '';
 
   systemd.user.services.kiwami-shell = {
     Unit = {

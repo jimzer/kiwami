@@ -64,7 +64,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 - [x] `just` module interface as a stable API boundary
 - [x] 13 gotchas documented in `vm/README.md`
 - [ ] `nixosTest` harness alongside the manual one  *(blocked: needs a Linux host)*
-- [ ] CI: run the VM test on x86_64 GitHub runners, screenshots as artifacts
+- [x] CI — evaluate, build x86_64 (CLI + closure), and a nixosTest that boots
+      the desktop. Screenshots uploaded as artifacts.
 
 ## Tier 0 — Foundation  `[~] IN PROGRESS`
 
@@ -83,9 +84,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
       tree, so `just vm reload` is edit -> `hyprctl reload`, no rebuild
 - [x] Home Manager wired as the package/dotfile layer only
 - [ ] `hosts/desktop/`  *(blocked: needs the machine)*
-- [ ] `SUPER+SHIFT+R` → restart the shell, hardcoded in hyprland.lua. Stated as
-      a principle early on and never actually added: if the shell wedges there
-      is currently no key that brings it back.
+- [x] `SUPER+SHIFT+R` → restart the shell, bound in the compositor so it works
+      when the shell is gone entirely
 - [ ] Track the impermanence persist-list from the start
 - [ ] *(blocked)* Install NixOS on the real desktop; generate + commit its
       `hardware-configuration.nix`
@@ -125,7 +125,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 - [ ] Wrapped vendor binaries as flake outputs (Claude etc.)
 - [ ] Clipboard manager, emoji picker
 - [ ] Calendar popup on clock click (local month only, no sync)
-- [ ] Notifications replacing mako — only after the bar is stable for weeks
+- [x] **Notifications** — Quickshell owns org.freedesktop.Notifications;
+      stacked popups, critical ones persist until dismissed, the rest expire
 
 ## Installer
 
