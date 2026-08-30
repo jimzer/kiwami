@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Cheap and always meaningful: catches a bad option name or a broken module
+  # without booting anything.
+  eval:
+    name: evaluate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: flake metadata is well formed
+        run: nix flake metadata --no-write-lock-file
+
+      - name: every host evaluates
+        run: |
+          for host in vm-aarch64 vm-x86_64; do
+            echo "==> $host"
+            nix eval --raw ".#nixosConfigurations.$host.config.system.build.toplevel.drvPath"
+            echo
+          done
+
+  # The Mac cannot build Linux, so this is the first place the CLI and the
+  # system closure are actually compiled for the architecture the real
+  # machine uses.
+  build:
+    name: build x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: kiwami CLI
+        run: nix build .#packages.x86_64-linux.kiwami --print-build-logs
+
+      - name: the CLI runs
+        run: ./result/bin/kiwami --version
+
+      - name: x86_64 system closure
+        run: |
+          nix build --print-build-logs \
+            ".#nixosConfigurations.vm-x86_64.config.system.build.toplevel"
+
+  # Boots the desktop in a VM and asserts the session actually comes up.
+  # Needs a Linux host, which is the whole reason it lives here and not on
+  # the development machine.
+  test:
+    name: desktop boots
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: KVM availability
+        run: |
+          if [ -e /dev/kvm ]; then
+            echo "/dev/kvm present - test runs accelerated"
+          else
+            echo "no /dev/kvm - falling back to emulation, this will be slow"
+          fi
+
+      - name: nixosTest
+        run: nix build --print-build-logs .#checks.x86_64-linux.desktop
+
+      - name: collect screenshots
+        if: always()
+        run: |
+          mkdir -p artifacts
+          # The test writes screenshots into its output directory.
+          cp -L result/*.png artifacts/ 2>/dev/null || true
+          find /tmp -name '*.png' -path '*vm-test*' -exec cp {} artifacts/ \; 2>/dev/null || true
+          ls -l artifacts || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desktop-screenshots
+          path: artifacts/
+          if-no-files-found: warn

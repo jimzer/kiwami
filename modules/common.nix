@@ -6,7 +6,6 @@
     experimental-features = [ "nix-command" "flakes" ];
     auto-optimise-store = true;
   };
-  nixpkgs.config.allowUnfree = true;
 
   time.timeZone = lib.mkDefault "Europe/Zurich";
   i18n.defaultLocale = lib.mkDefault "en_US.UTF-8";
