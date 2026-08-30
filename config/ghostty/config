@@ -1,6 +1,11 @@
 # Kiwami Ghostty configuration.
 # Plain config file — edit and restart the terminal, no rebuild.
 
+# Colours come from the active theme. The `?` makes it optional so a machine
+# with no theme applied yet still starts. Ghostty re-reads on SIGUSR2, which is
+# what kiwami-theme sends.
+config-file = ?~/.local/state/kiwami/current/theme/ghostty.conf
+
 font-family = JetBrainsMono Nerd Font
 font-size = 11
 

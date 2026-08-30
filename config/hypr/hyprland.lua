@@ -5,11 +5,21 @@
 
 local mod = "SUPER"
 
+-- Colours from the active theme. pcall so a missing or broken theme leaves the
+-- compositor usable rather than refusing to start.
+local ok, theme = pcall(dofile,
+  os.getenv("HOME") .. "/.local/state/kiwami/current/theme/colors.lua")
+if not ok or type(theme) ~= "table" then
+  theme = { accent = "7ad07a", muted = "4b5a52" }
+end
+
 hl.config {
   general = {
     gaps_in = 4,
     gaps_out = 8,
     border_size = 2,
+    ["col.active_border"] = "rgba(" .. theme.accent .. "ff)",
+    ["col.inactive_border"] = "rgba(" .. theme.muted .. "80)",
   },
   decoration = {
     rounding = 6,

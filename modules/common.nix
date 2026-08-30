@@ -22,5 +22,5 @@
     settings.PasswordAuthentication = lib.mkDefault true;
   };
 
-  environment.systemPackages = with pkgs; [ git vim curl htop rsync ];
+  environment.systemPackages = with pkgs; [ git vim curl htop rsync jq ];
 }

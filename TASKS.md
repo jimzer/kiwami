@@ -98,9 +98,11 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
       title, running clock. Still to do: top/bottom as one setting
 - [x] **Launcher** — `DesktopEntries`, prefix-first filtering, keyboard nav,
       `SUPER+SPACE` via a Hyprland global shortcut
-- [~] **Theme pipeline** — `shell/Theme.qml` is the single source for the QML
-      side. Still to do: one file feeding Hyprland + QML + Ghostty together.
-      *Do this before the third widget or it becomes a retrofit.*
+- [x] **Theme pipeline** — `config/themes/<name>/colors.json` is the single
+      source. Quickshell reads and watches it directly (retints with no
+      restart); `bin/kiwami-theme` generates `ghostty.conf` and `colors.lua`
+      for the two that cannot. Everything points at the stable path
+      `~/.local/state/kiwami/current/theme`.
 - [ ] **`kiwami` CLI** — `update`, `rollback`, `doctor` only
 - [ ] **`kiwami doctor`** — strays in `~/.local/bin`, `npm -g`, `cargo install`,
       and `nix profile list` must be empty (declarative-only invariant)

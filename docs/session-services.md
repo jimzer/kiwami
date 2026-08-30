@@ -93,3 +93,31 @@ the tree is known complete.
 Enabling a unit while the target is **already active** does not start it, and
 `systemctl --user start <already-active-target>` is a no-op. Restart the session
 or start the unit explicitly.
+
+
+## Trap 3: replacing a directory breaks watchers
+
+`kiwami-theme` first published by building a staging directory and swapping it:
+
+```
+mv "$STAGE" "$CURRENT.new"
+rm -rf "$CURRENT"          # <- the file is gone here
+mv "$CURRENT.new" "$CURRENT"
+```
+
+That window is short but real. The shell's `FileView` read during it and logged
+`Read of .../colors.json failed: File does not exist.` — and then stopped
+watching, so the shell was stuck on its fallback palette until restarted, even
+after the theme was in place.
+
+Two fixes, both needed:
+
+- **Publish per file, never by replacing a directory.** `rsync -a --delete`
+  writes each file to a temp name and renames it into place, so a consumer
+  never sees it absent.
+- **Recover from a failed read.** `onLoadFailed` retries after a short delay,
+  so a watcher that loses its file is not dead for the rest of the session.
+
+This is the same shape as the `rm -rf` in `just vm push` that made Hyprland's
+config vanish mid-reload. Anything that deletes a tree other processes are
+watching will produce it.
