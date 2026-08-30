@@ -31,6 +31,10 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 
 ## Decisions still open
 
+- (?) **Quickshell launch model.** Omarchy execs the shell from Hyprland with a
+  wrapper adding journal logging and a restart loop, and keeps systemd units for
+  peripheral services. Either works now that UWSM is in. See
+  [docs/session-services.md](docs/session-services.md).
 - (?) **Quickshell: from scratch vs fork.** Building from scratch is the stated
   goal; forking a public config to restyle is far faster. Possible split: fork to
   learn, rewrite once the API is familiar.
@@ -120,12 +124,6 @@ variants · anything requiring other people to adopt it
 
 ## Known debt
 
-- **`graphical-session.target` is inactive.** `start-hyprland` sets up dbus,
-  exports `WAYLAND_DISPLAY`, and starts the portals, but does not activate the
-  target that user units bind to via `WantedBy=graphical-session.target`.
-  Fine while the shell is launched with `hl.on("hyprland.start", ...)`; must be
-  fixed (probably `programs.uwsm.enable` + `programs.hyprland.withUWSM`) before
-  running Quickshell as a systemd user service.
 
 - `hardware-configuration.nix` for the VM mounts **by label**, not UUID, because
   `just vm install` reformats and mkfs generates new UUIDs each time. Real

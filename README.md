@@ -60,6 +60,12 @@ moves when `flake.lock` says, not when upstream pushes.
 
 **Hyprland is configured in Lua** (v0.55+), not `hyprland.conf`.
 
+## Session services
+
+Hyprland is launched through UWSM so `graphical-session.target` actually
+activates. Two traps that make session services fail silently — and their fixes
+— are written up in [docs/session-services.md](docs/session-services.md).
+
 ## The VM harness
 
 Three independent channels into the guest — QMP for framebuffer screenshots and
