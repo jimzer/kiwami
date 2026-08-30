@@ -21,6 +21,15 @@ fetch-iso:
 install: fetch-iso
     ./scripts/install.sh
 
+# Boot with the installer's scratch disks attached (empty NVMe, a partitioned
+# disk, and one too small) so `just vm install-test` has something to enumerate
+start-test-disks:
+    @TEST_DISKS=1 ./scripts/start-vm.sh run headless
+
+# Run the installer test matrix (needs start-test-disks)
+install-test:
+    @./scripts/install-test.sh
+
 # Boot the installed system (headless, detached)
 start:
     ./scripts/start-vm.sh run headless

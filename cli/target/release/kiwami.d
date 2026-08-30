@@ -1,0 +1,1 @@
+/Users/jimzer/Projects/jimivaubien/kiwamios/cli/target/release/kiwami: /Users/jimzer/Projects/jimivaubien/kiwamios/cli/src/commands.rs /Users/jimzer/Projects/jimivaubien/kiwamios/cli/src/install.rs /Users/jimzer/Projects/jimivaubien/kiwamios/cli/src/main.rs /Users/jimzer/Projects/jimivaubien/kiwamios/cli/src/paths.rs /Users/jimzer/Projects/jimivaubien/kiwamios/cli/src/theme.rs

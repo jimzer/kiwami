@@ -49,6 +49,21 @@
           src = ./cli;
           cargoLock.lockFile = ./cli/Cargo.lock;
           meta.mainProgram = "kiwami";
+
+          nativeBuildInputs = [ pkgs.makeWrapper ];
+          # `kiwami install` shells out to these. On the installer ISO they
+          # happen to be present; everywhere else they are not, and the
+          # installer would fail partway through with "command not found"
+          # after it had already started writing. Carry them explicitly.
+          postInstall = ''
+            wrapProgram $out/bin/kiwami --prefix PATH : ${pkgs.lib.makeBinPath (with pkgs; [
+              parted
+              dosfstools      # mkfs.fat
+              e2fsprogs       # mkfs.ext4
+              util-linux      # mount
+              systemd         # udevadm
+            ])}
+          '';
         };
         default = kiwami;
       });

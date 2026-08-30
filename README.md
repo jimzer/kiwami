@@ -25,6 +25,8 @@ the same build serves `nix run github:jimzer/kiwami`, the system closure, and
 any future image.
 
 ```bash
+kiwami install             # install to a disk (from the live ISO)
+kiwami disks               # what the installer can see
 kiwami theme list          # available themes, active one marked
 kiwami theme set midnight  # switch, regenerate, retint everything
 kiwami commands --json     # actions the launcher should offer
@@ -57,6 +59,8 @@ just vm screenshot bar
 just vm rebuild      # push the flake and nixos-rebuild switch
 just vm reload       # push, reload Hyprland, restart the shell — no rebuild
 just vm shell-log    # journal for the shell unit
+just vm start-test-disks   # boot with the installer's scratch disks
+just vm install-test       # installer test matrix
 just vm hyprctl clients
 ```
 

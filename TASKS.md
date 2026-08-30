@@ -129,6 +129,17 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 - [ ] Calendar popup on clock click (local month only, no sync)
 - [ ] Notifications replacing mako — only after the bar is stable for weeks
 
+## Installer
+
+- [x] `kiwami install` — disk detection, numbered selection, size and in-use
+      refusals, explicit confirmation before anything is written
+- [x] Test matrix (`just vm install-test`) — 13 checks over scratch disks
+      including an NVMe, a partitioned disk and one too small
+- [ ] Drive `just vm install` through `kiwami install` instead of the fixed
+      `/dev/vda` script
+- [ ] One validation run on real firmware (vendor UEFI quirks are the part a
+      VM cannot model)
+
 ## Tier 4 — Packaging
 
 - [ ] `nix build .#iso` installer image

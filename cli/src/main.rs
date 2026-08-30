@@ -1,4 +1,5 @@
 mod commands;
+mod install;
 mod paths;
 mod theme;
 
@@ -18,6 +19,26 @@ enum Cmd {
         #[command(subcommand)]
         action: ThemeCmd,
     },
+    /// Install Kiwami to a disk. Intended to run from the live ISO.
+    Install {
+        /// Target disk, e.g. /dev/nvme0n1. Prompts if omitted.
+        #[arg(long)]
+        disk: Option<String>,
+        /// Host attribute in the flake to install
+        #[arg(long, default_value = "desktop")]
+        host: String,
+        /// Flake to install from
+        #[arg(long, default_value = "github:jimzer/kiwami")]
+        flake: String,
+        /// Skip the confirmation prompt
+        #[arg(long)]
+        yes: bool,
+        /// Allow running on an already-installed system
+        #[arg(long)]
+        force: bool,
+    },
+    /// List disks the installer can see, and exit
+    Disks,
     /// Emit the actions the launcher should offer, as JSON
     Commands {
         /// Currently the only supported format; present so the shape is explicit.
@@ -72,6 +93,25 @@ fn main() -> std::process::ExitCode {
                 }
             },
         },
+        Cmd::Install { disk, host, flake, yes, force } => {
+            let opts = install::Options {
+                disk,
+                host,
+                flake,
+                assume_yes: yes,
+                force,
+            };
+            if let Err(e) = install::run_install(opts) {
+                eprintln!("\ninstall: {e}");
+                return std::process::ExitCode::FAILURE;
+            }
+        }
+        Cmd::Disks => {
+            if let Err(e) = install::list_disks() {
+                eprintln!("{e}");
+                return std::process::ExitCode::FAILURE;
+            }
+        }
         Cmd::Commands { .. } => {
             let entries = commands::all();
             println!("{}", serde_json::to_string_pretty(&entries).unwrap());
