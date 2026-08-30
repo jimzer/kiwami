@@ -162,3 +162,15 @@ sits waiting for output that is being delivered to someone else.
 
 Use `just vm ssh` to look at a guest that a script is currently driving over
 serial, or wait for it to finish.
+
+
+## The "started without start-hyprland" banner under UWSM
+
+UWSM launches the compositor binary directly, so Hyprland shows its
+"started without start-hyprland" warning for a few seconds at session start.
+
+It is cosmetic here. UWSM does the session setup the warning is about - it
+imports the environment and activates graphical-session.target, both verified
+above - it just is not the wrapper Hyprland looks for. The banner expires on
+its own, which is why it appears in CI screenshots (captured seconds after
+boot) and not in ones taken later.

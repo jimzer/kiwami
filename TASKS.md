@@ -156,6 +156,11 @@ variants · anything requiring other people to adopt it
 
 ## Known debt
 
+- Three separate things only worked inside a dev checkout before CI existed:
+  themes, the shell QML tree, and the Hyprland/Ghostty configs. All now install
+  under `/etc/kiwami/` with the working tree preferred at runtime. Anything new
+  the desktop needs at runtime should follow the same shape from the start.
+
 
 - `hardware-configuration.nix` for the VM mounts **by label**, not UUID, because
   `just vm install` reformats and mkfs generates new UUIDs each time. Real
