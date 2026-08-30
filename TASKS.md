@@ -103,7 +103,9 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
       restart); `bin/kiwami-theme` generates `ghostty.conf` and `colors.lua`
       for the two that cannot. Everything points at the stable path
       `~/.local/state/kiwami/current/theme`.
-- [ ] **`kiwami` CLI** — `update`, `rollback`, `doctor` only
+- [~] **`kiwami` CLI** — Rust, built by the flake as `packages.<system>.kiwami`.
+      Has `theme list/current/set` and `commands --json`. Still to do:
+      `update`, `rollback`, `doctor`
 - [ ] **`kiwami doctor`** — strays in `~/.local/bin`, `npm -g`, `cargo install`,
       and `nix profile list` must be empty (declarative-only invariant)
 - [ ] **Power menu** — five exec lines, disproportionate payoff

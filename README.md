@@ -18,6 +18,22 @@ The dev VM deliberately does *not* install this way: `just vm install` ships the
 working tree over the serial console, so it tests uncommitted changes rather than
 the last pushed commit.
 
+## The CLI
+
+`cli/` is a Rust binary built by this flake as `packages.<system>.kiwami`, so
+the same build serves `nix run github:jimzer/kiwami`, the system closure, and
+any future image.
+
+```bash
+kiwami theme list          # available themes, active one marked
+kiwami theme set midnight  # switch, regenerate, retint everything
+kiwami commands --json     # actions the launcher should offer
+```
+
+The launcher merges `kiwami commands --json` with `.desktop` applications, so
+typing "theme" offers the theme switches without opening a terminal. The CLI
+stays the single source of truth for what it can do.
+
 ## Layout
 
 ```

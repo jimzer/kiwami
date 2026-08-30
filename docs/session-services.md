@@ -121,3 +121,34 @@ Two fixes, both needed:
 This is the same shape as the `rm -rf` in `just vm push` that made Hyprland's
 config vanish mid-reload. Anything that deletes a tree other processes are
 watching will produce it.
+
+
+## Trap 4: NixOS wrappers break `pgrep -x` / `pkill -x`
+
+NixOS wraps many binaries, and the kernel truncates `comm` to 15 characters, so
+a process launched as `ghostty` reports:
+
+```
+comm: .ghostty-wrappe
+```
+
+`pkill -x ghostty` therefore matches nothing and fails **silently**. The same
+bites `pgrep -x Hyprland`, which reports `.Hyprland-wrapp`. Scripts copied from
+other distros hit this: Omarchy guards its terminal reload with
+`pgrep -x ghostty`, which is correct on Arch and a no-op here.
+
+Matching loosely is worse than not matching. An unhandled signal's default
+disposition is to **terminate** the process, so an over-broad `pkill -USR2`
+kills every unrelated process it hits. `kiwami` walks `/proc/*/comm` and
+accepts only the exact name or NixOS's `.<name>-wrapp…` form.
+
+### Verifying a signal is actually handled
+
+`strings` on the binary is not a test — a Zig or Rust handler need not contain
+the literal `"SIGUSR2"`. The authoritative check is the caught-signal mask:
+
+```
+grep SigCgt /proc/<pid>/status     # 0000000100000800
+```
+
+Bit 11 (`0x800`) is SIGUSR2. Set means the process installed a handler for it.

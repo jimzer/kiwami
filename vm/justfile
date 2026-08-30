@@ -55,7 +55,7 @@ status:
 # out-of-store symlinks into this tree, so deleting it makes them dangle. A
 # compositor or shell that reloads during that window reads a missing file.
 push:
-    @cd .. && COPYFILE_DISABLE=1 tar --no-xattrs -cf - flake.nix flake.lock hosts modules config shell bin \
+    @cd .. && COPYFILE_DISABLE=1 tar --no-xattrs -cf - flake.nix flake.lock hosts modules config shell cli \
         | ./vm/scripts/vmssh 'rm -rf ~/.kiwami-staging && mkdir -p ~/.kiwami-staging ~/kiwami \
             && tar xf - -C ~/.kiwami-staging \
             && rsync -a --delete ~/.kiwami-staging/ ~/kiwami/ \
@@ -137,7 +137,11 @@ restart-session:
 
 # Apply a theme (regenerates ghostty/hyprland files, retints everything)
 theme NAME="kiwami": push
-    @./scripts/vmssh '~/kiwami/bin/kiwami-theme {{NAME}}'
+    @./scripts/vmssh 'kiwami theme set {{NAME}}'
+
+# List themes, marking the active one
+themes:
+    @./scripts/vmssh 'kiwami theme list'
 
 # --- observing ---------------------------------------------------------
 

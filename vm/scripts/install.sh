@@ -44,7 +44,7 @@ step "pushing the flake to the installer"
 # Transfer is chunked base64 over the serial line: a tty in canonical mode
 # truncates lines past ~4096 bytes, and one line per file would exceed that.
 B64=$(cd "$VM_DIR/.." && COPYFILE_DISABLE=1 tar --no-xattrs -czf - \
-        flake.nix flake.lock hosts modules config shell bin | base64 | tr -d '\n')
+        flake.nix flake.lock hosts modules config shell cli | base64 | tr -d '\n')
 echo "    payload: ${#B64} chars"
 $CONSOLE run 'rm -rf /tmp/kiwami && mkdir -p /tmp/kiwami && rm -f /tmp/k.b64' >/dev/null
 for (( i=0; i<${#B64}; i+=2500 )); do

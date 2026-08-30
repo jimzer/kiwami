@@ -1,4 +1,5 @@
 import Quickshell
+import Quickshell.Io
 import Quickshell.Wayland
 import Quickshell.Hyprland
 import QtQuick
@@ -19,18 +20,52 @@ PanelWindow {
 
     property string query: ""
 
+    // Actions come from `kiwami commands --json`, so the CLI stays the single
+    // source of truth for what it can do. Refreshed each time the launcher
+    // opens, which is how a newly added theme shows up without a restart.
+    property var actions: []
+
+    Process {
+        id: commandsProc
+        command: ["kiwami", "commands", "--json"]
+        stdout: StdioCollector {
+            onStreamFinished: {
+                try {
+                    root.actions = JSON.parse(text).map(e => ({
+                        name: e.name,
+                        subtitle: e.description,
+                        exec: e.exec,
+                        isAction: true
+                    }));
+                } catch (e) {
+                    console.warn("launcher: could not read kiwami commands:", e);
+                    root.actions = [];
+                }
+            }
+        }
+    }
+
     // The compositor owns the app list; Quickshell indexes .desktop files and
     // hands them over already parsed.
     readonly property var results: {
         const q = query.toLowerCase();
-        return DesktopEntries.applications.values
-            .filter(a => !a.noDisplay
-                && (q === "" || a.name.toLowerCase().includes(q)))
+
+        const apps = DesktopEntries.applications.values
+            .filter(a => !a.noDisplay)
+            .map(a => ({ name: a.name, subtitle: "", entry: a, isAction: false }));
+
+        return apps.concat(actions)
+            .filter(e => q === ""
+                || e.name.toLowerCase().includes(q)
+                || e.subtitle.toLowerCase().includes(q))
             .sort((a, b) => {
-                // Prefix matches first, then alphabetical.
+                // Prefix matches first, then actions above apps so typing
+                // "theme" surfaces the commands, then alphabetical.
                 const ap = a.name.toLowerCase().startsWith(q) ? 0 : 1;
                 const bp = b.name.toLowerCase().startsWith(q) ? 0 : 1;
-                return ap !== bp ? ap - bp : a.name.localeCompare(b.name);
+                if (ap !== bp) return ap - bp;
+                if (a.isAction !== b.isAction) return a.isAction ? -1 : 1;
+                return a.name.localeCompare(b.name);
             })
             .slice(0, 12);
     }
@@ -38,12 +73,18 @@ PanelWindow {
     function open() {
         query = "";
         list.currentIndex = 0;
+        commandsProc.running = true;   // pick up themes added since last time
         visible = true;
         input.forceActiveFocus();
     }
 
-    function launch(entry) {
-        if (entry) entry.execute();
+    function launch(result) {
+        if (!result) return;
+        if (result.isAction) {
+            Quickshell.execDetached(result.exec);
+        } else {
+            result.entry.execute();
+        }
         visible = false;
     }
 
@@ -120,14 +161,30 @@ PanelWindow {
                     color: index === list.currentIndex ? Theme.bgAlt : "transparent"
                     radius: Theme.radius
 
-                    Text {
+                    Row {
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.left: parent.left
                         anchors.leftMargin: Theme.gap
-                        text: modelData.name
-                        color: index === list.currentIndex ? Theme.fg : Theme.fgDim
-                        font.family: Theme.font
-                        font.pixelSize: Theme.fontSize
+                        anchors.right: parent.right
+                        anchors.rightMargin: Theme.gap
+                        spacing: Theme.gap
+
+                        Text {
+                            text: modelData.name
+                            color: modelData.isAction
+                                ? Theme.accent
+                                : (index === list.currentIndex ? Theme.fg : Theme.fgDim)
+                            font.family: Theme.font
+                            font.pixelSize: Theme.fontSize
+                        }
+
+                        Text {
+                            text: modelData.subtitle
+                            color: Theme.fgDim
+                            font.family: Theme.font
+                            font.pixelSize: Theme.fontSize - 2
+                            anchors.verticalCenter: parent.verticalCenter
+                        }
                     }
 
                     MouseArea {

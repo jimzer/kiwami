@@ -1,5 +1,5 @@
 # Settings every Kiwami host gets, regardless of hardware.
-{ lib, pkgs, ... }:
+{ lib, pkgs, inputs, ... }:
 
 {
   nix.settings = {
@@ -22,5 +22,8 @@
     settings.PasswordAuthentication = lib.mkDefault true;
   };
 
-  environment.systemPackages = with pkgs; [ git vim curl htop rsync jq ];
+  environment.systemPackages = [
+    # The distro's own CLI, built from cli/ by this flake.
+    inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.kiwami
+  ] ++ (with pkgs; [ git vim curl htop rsync jq ]);
 }

@@ -20,6 +20,10 @@
 
   outputs = { self, nixpkgs, home-manager, ... }@inputs:
     let
+      systems = [ "aarch64-linux" "x86_64-linux" "aarch64-darwin" ];
+      forAllSystems = f:
+        nixpkgs.lib.genAttrs systems (s: f nixpkgs.legacyPackages.${s});
+
       mkHost = system: modules:
         nixpkgs.lib.nixosSystem {
           inherit system;
@@ -36,6 +40,19 @@
         };
     in
     {
+      # The kiwami CLI. Built once here and consumed by the hosts below, so the
+      # binary that ships on an image is the same one `nix run` gives you.
+      packages = forAllSystems (pkgs: rec {
+        kiwami = pkgs.rustPlatform.buildRustPackage {
+          pname = "kiwami";
+          version = "0.1.0";
+          src = ./cli;
+          cargoLock.lockFile = ./cli/Cargo.lock;
+          meta.mainProgram = "kiwami";
+        };
+        default = kiwami;
+      });
+
       nixosConfigurations = {
         # Dev VM on the Mac: aarch64 so it runs natively under HVF.
         vm-aarch64 = mkHost "aarch64-linux" [ ./hosts/vm-aarch64 ];
