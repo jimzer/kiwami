@@ -24,6 +24,13 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 - **Dev VM is aarch64**, native under HVF. Architecture is irrelevant for bar
   layout and launcher logic; GPU/kernel work happens on the real machine.
 - **Never write a custom lock screen.** Keep `hyprlock` permanently.
+- **The session runs under UWSM**, so `graphical-session.target` activates and
+  user units work. See [docs/session-services.md](docs/session-services.md).
+- **The shell runs as a systemd user unit**, not exec'd from Hyprland. We get
+  `Restart=always`, `journalctl --user -u`, and a clean
+  `systemctl --user restart` to pair with the disabled file watcher. Omarchy
+  execs theirs instead, but only after rebuilding logging and restart-on-crash
+  by hand in a wrapper script.
 - **Hyprland config in Lua** (v0.55+), not `hyprland.conf`. Decided before any
   binds were written, so there is nothing to port. Real logic in binds and rules
   stays in a language with functions and variables, and it matches the QML/JS
@@ -31,10 +38,6 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 
 ## Decisions still open
 
-- (?) **Quickshell launch model.** Omarchy execs the shell from Hyprland with a
-  wrapper adding journal logging and a restart loop, and keeps systemd units for
-  peripheral services. Either works now that UWSM is in. See
-  [docs/session-services.md](docs/session-services.md).
 - (?) **Quickshell: from scratch vs fork.** Building from scratch is the stated
   goal; forking a public config to restyle is far faster. Possible split: fork to
   learn, rewrite once the API is familiar.

@@ -20,6 +20,11 @@ Omarchy uses both: the shell is exec'd from Hyprland (wrapped in a script that
 adds journal logging and a restart loop), while peripheral services like fcitx5
 and the bluetooth agent are user units.
 
+**Kiwami uses a unit for the shell.** UWSM enables the option; it does not force
+it, so this is a separate decision. We take it because `Restart=always`,
+`journalctl --user -u kiwami-shell`, and `systemctl --user restart` come for
+free, where the exec model needs a wrapper script to rebuild all three.
+
 ## Why UWSM
 
 A compositor does not activate `graphical-session.target` on its own — it stays
