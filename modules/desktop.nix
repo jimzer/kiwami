@@ -67,6 +67,11 @@
   # checkout, and pointing the unit at one made it restart-loop forever.
   environment.etc."kiwami/shell".source = ../shell;
 
+  # Hyprland and Ghostty configs, for the same reason again. This is the third
+  # thing that only worked inside a checkout; anything the desktop needs at
+  # runtime belongs here, with the working tree as an override.
+  environment.etc."kiwami/config".source = ../config;
+
   security.polkit.enable = true;
   services.dbus.enable = true;
   xdg.portal = {
