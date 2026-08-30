@@ -1,0 +1,6 @@
+vm/disks/
+vm/iso/
+vm/serial.log
+vm/keys/
+vm/screenshots/*.png
+vm/scripts/__pycache__/

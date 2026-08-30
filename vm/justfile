@@ -1,0 +1,133 @@
+# Kiwami dev VM — stable command interface.
+# Implementation lives in scripts/; these recipe names are the contract.
+
+set shell := ["bash", "-uc"]
+
+iso_url := "https://releases.nixos.org/nixos/26.05/nixos-26.05.8639.c5c4a43b0e80/nixos-minimal-26.05.8639.c5c4a43b0e80-aarch64-linux.iso"
+iso_path := "iso/nixos-minimal-26.05-aarch64.iso"
+
+# List available commands
+default:
+    @just --list --unsorted
+
+# --- lifecycle ---------------------------------------------------------
+
+# Download the NixOS installer ISO (skipped if present)
+fetch-iso:
+    @mkdir -p iso
+    @test -f {{iso_path}} && echo "iso present" || curl -fL --retry 3 -C - -o {{iso_path}} "{{iso_url}}"
+
+# Wipe the disk and do a full unattended NixOS install
+install: fetch-iso
+    ./scripts/install.sh
+
+# Boot the installed system (headless, detached)
+start:
+    ./scripts/start-vm.sh run headless
+
+# Boot with a window you can click in
+gui:
+    ./scripts/start-vm.sh run gui
+
+# Boot from the installer ISO instead of the disk
+boot-iso: fetch-iso
+    ./scripts/start-vm.sh install headless
+
+# Shut the VM down
+stop:
+    ./scripts/stop-vm.sh
+
+# Stop then start
+restart: stop start
+
+# Is the VM up, and on which channels?
+status:
+    @pgrep -f qemu-system-aarch64 >/dev/null && echo "qemu:    running" || echo "qemu:    stopped"
+    @test -S /tmp/kiwami-qmp.sock && echo "qmp:     /tmp/kiwami-qmp.sock" || echo "qmp:     -"
+    @test -S /tmp/kiwami-serial.sock && echo "serial:  /tmp/kiwami-serial.sock" || echo "serial:  -"
+    @./scripts/vmssh 'echo "ssh:     ok — $(hostname) $(uname -m) — $(systemctl is-system-running)"' 2>/dev/null || echo "ssh:     unreachable"
+
+# --- flake -------------------------------------------------------------
+
+# Copy the flake into the guest at ~/kiwami
+# COPYFILE_DISABLE stops macOS tar emitting AppleDouble "._" files.
+push:
+    @cd .. && COPYFILE_DISABLE=1 tar cf - flake.nix flake.lock hosts modules \
+        | ./vm/scripts/vmssh 'rm -rf ~/kiwami && mkdir -p ~/kiwami && tar xf - -C ~/kiwami'
+    @./scripts/vmssh 'find ~/kiwami -type f | sort | sed "s|/home/nixos/kiwami/|  |"'
+
+# Push, then nixos-rebuild switch inside the guest
+rebuild HOST="vm-aarch64": push
+    @./scripts/vmssh 'sudo nixos-rebuild switch --flake ~/kiwami#{{HOST}}'
+
+# Evaluate the config on the HOST (no VM needed, catches option errors fast)
+eval HOST="vm-aarch64":
+    @cd .. && nix eval --raw .#nixosConfigurations.{{HOST}}.config.system.build.toplevel.drvPath && echo ""
+
+# Update flake inputs and re-lock (run on the host)
+update:
+    @cd .. && nix flake update
+
+# --- driving -----------------------------------------------------------
+
+# Run a command in the guest over ssh:  just ssh 'uname -a'
+ssh +CMD:
+    @./scripts/vmssh {{quote(CMD)}}
+
+# Interactive shell in the guest
+shell:
+    @./scripts/vmssh
+
+# Run a command over the serial console (works before ssh is up)
+run +CMD:
+    @python3 scripts/console.py run {{quote(CMD)}}
+
+# Log in at the serial getty prompt
+console-login:
+    @python3 scripts/console.py login
+
+# Wait for text to appear on the serial console:  just expect 'kiwami-vm login'
+expect +TEXT:
+    @python3 scripts/console.py expect {{quote(TEXT)}}
+
+# Send a single keystroke via QMP:  just key ctrl-alt-f2
+key +KEYS:
+    @python3 scripts/qmp.py key {{KEYS}}
+
+# --- observing ---------------------------------------------------------
+
+# Capture the framebuffer:  just screenshot bar
+screenshot NAME="screen":
+    @mkdir -p screenshots
+    @python3 scripts/qmp.py screenshot screenshots/{{NAME}}.png
+
+# Tail the serial log
+logs N="40":
+    @tail -c 8000 serial.log | sed 's/\x1b\[[0-9;?]*[a-zA-Z]//g' | tail -{{N}}
+
+# --- snapshots ---------------------------------------------------------
+
+# List disk snapshots
+snaps:
+    @./scripts/snapshot.sh list
+
+# Save a snapshot (VM must be stopped):  just snap clean
+snap TAG:
+    @./scripts/snapshot.sh save {{TAG}}
+
+# Restore a snapshot (VM must be stopped):  just restore installed
+restore TAG:
+    @./scripts/snapshot.sh restore {{TAG}}
+
+# Stop, restore the 'installed' snapshot, boot again
+reset: stop (restore "installed") start
+
+# --- housekeeping ------------------------------------------------------
+
+# Remove screenshots and serial log
+clean:
+    @rm -f screenshots/*.png serial.log && echo "cleaned"
+
+# Also remove the disk image and UEFI vars (keeps the ISO)
+clean-disk: stop
+    @rm -f disks/kiwami.qcow2 disks/edk2-vars.fd && echo "disk removed"

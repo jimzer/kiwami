@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Run a command in the dev VM over ssh.
+DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec ssh -p "${SSH_PORT:-2222}" -i "$DIR/keys/kiwami_vm" \
+  -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+  -o LogLevel=ERROR -o ConnectTimeout=10 nixos@127.0.0.1 "$@"
