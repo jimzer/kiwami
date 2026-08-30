@@ -6,6 +6,18 @@ small CLI to drive it — developed against an agent-drivable VM harness.
 Status: early. The VM harness and the flake foundation work; the desktop does
 not exist yet. See [TASKS.md](TASKS.md).
 
+## Installing on real hardware
+
+Boot the official NixOS ISO, partition, then:
+
+```bash
+nixos-install --flake github:jimzer/kiwami#desktop
+```
+
+The dev VM deliberately does *not* install this way: `just vm install` ships the
+working tree over the serial console, so it tests uncommitted changes rather than
+the last pushed commit.
+
 ## Layout
 
 ```

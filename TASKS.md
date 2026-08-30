@@ -63,6 +63,9 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 - [x] VM rebuilt from the flake and **rebooted into it** (generation 3)
 - [x] `install.sh` installs via `nixos-install --flake`; `vm/config/` deleted,
       so the flake is the single definition of the machine
+- [x] Public repo at github.com/jimzer/kiwami — `nixos-install --flake
+      github:jimzer/kiwami#<host>` verified to produce the same derivation as
+      the local tree
 - [ ] `hosts/desktop/`
 - [ ] `mkOutOfStoreSymlink` wiring for the live QML/Hyprland checkout
 - [ ] Home Manager as **package layer only** (`home.packages`, git, ssh, direnv)
