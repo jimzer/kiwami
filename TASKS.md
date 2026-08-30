@@ -63,7 +63,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 - [x] Snapshot / restore (`just vm reset`)
 - [x] `just` module interface as a stable API boundary
 - [x] 13 gotchas documented in `vm/README.md`
-- [ ] `nixosTest` harness alongside the manual one (needs a Linux host)
+- [ ] `nixosTest` harness alongside the manual one  *(blocked: needs a Linux host)*
 - [ ] CI: run the VM test on x86_64 GitHub runners, screenshots as artifacts
 
 ## Tier 0 — Foundation  `[~] IN PROGRESS`
@@ -82,14 +82,12 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 - [x] `mkOutOfStoreSymlink` wiring — `~/.config/hypr` resolves to the working
       tree, so `just vm reload` is edit -> `hyprctl reload`, no rebuild
 - [x] Home Manager wired as the package/dotfile layer only
-- [ ] `hosts/desktop/`
-- [ ] `mkOutOfStoreSymlink` wiring for the live QML/Hyprland checkout
-- [ ] Home Manager as **package layer only** (`home.packages`, git, ssh, direnv)
-- [ ] Hyprland autostarting in the VM, with `SUPER+Return → terminal` and
-      `SUPER+SHIFT+R → restart qs` hardcoded on disk (never lock yourself out)
-- [ ] Pin Quickshell as a flake input (`github:quickshell-mirror/quickshell`)
+- [ ] `hosts/desktop/`  *(blocked: needs the machine)*
+- [ ] `SUPER+SHIFT+R` → restart the shell, hardcoded in hyprland.lua. Stated as
+      a principle early on and never actually added: if the shell wedges there
+      is currently no key that brings it back.
 - [ ] Track the impermanence persist-list from the start
-- [ ] Install NixOS on the real desktop; generate + commit its
+- [ ] *(blocked)* Install NixOS on the real desktop; generate + commit its
       `hardware-configuration.nix`
 
 ## Tier 1 — The product
@@ -100,7 +98,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
       `SUPER+SPACE` via a Hyprland global shortcut
 - [x] **Theme pipeline** — `config/themes/<name>/colors.json` is the single
       source. Quickshell reads and watches it directly (retints with no
-      restart); `bin/kiwami-theme` generates `ghostty.conf` and `colors.lua`
+      restart); `kiwami theme set` generates `ghostty.conf` and `colors.lua`
       for the two that cannot. Everything points at the stable path
       `~/.local/state/kiwami/current/theme`.
 - [~] **`kiwami` CLI** — Rust, built by the flake as `packages.<system>.kiwami`.
@@ -115,7 +113,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 - [x] **Audio OSD** — reacts to PipeWire state rather than being told to
       appear, so it also shows when something else changes the volume. Verified
       against a real sink (QEMU now gives the VM an HDA card)
-- [~] **Brightness OSD / battery** — written and wired, but *unverified*: the
+- [~] **Brightness OSD / battery**  *(blocked: needs real hardware)* — written and wired, but *unverified*: the
       VM has no backlight and no battery, so both paths only prove they hide
       cleanly. Needs real hardware.
 
@@ -137,7 +135,7 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
       including an NVMe, a partitioned disk and one too small
 - [x] `just vm install` drives `kiwami install`, so the installer under test
       is the one that ships. There is no second installer to drift.
-- [ ] One validation run on real firmware (vendor UEFI quirks are the part a
+- [ ] *(blocked: needs real hardware)* One validation run on real firmware (vendor UEFI quirks are the part a
       VM cannot model)
 
 ## Tier 4 — Packaging
