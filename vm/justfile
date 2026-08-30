@@ -64,7 +64,7 @@ status:
 # out-of-store symlinks into this tree, so deleting it makes them dangle. A
 # compositor or shell that reloads during that window reads a missing file.
 push:
-    @cd .. && COPYFILE_DISABLE=1 tar --no-xattrs -cf - flake.nix flake.lock hosts modules config shell cli \
+    @cd .. && COPYFILE_DISABLE=1 tar --no-xattrs --exclude='cli/target' -cf - flake.nix flake.lock hosts modules config shell cli \
         | ./vm/scripts/vmssh 'rm -rf ~/.kiwami-staging && mkdir -p ~/.kiwami-staging ~/kiwami \
             && tar xf - -C ~/.kiwami-staging \
             && rsync -a --delete ~/.kiwami-staging/ ~/kiwami/ \

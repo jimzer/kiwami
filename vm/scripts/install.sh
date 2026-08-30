@@ -23,27 +23,10 @@ step "waiting for installer shell"
 TIMEOUT=240 $CONSOLE expect 'nixos@nixos' >/dev/null || { echo "installer never came up"; exit 1; }
 $CONSOLE send 'sudo -i' >/dev/null; sleep 1
 
-# Labels matter: hosts/vm-aarch64/hardware-configuration.nix mounts by label,
-# so these names are part of the contract, not cosmetic.
-step "partitioning"
-$CONSOLE run 'parted -s /dev/vda -- mklabel gpt mkpart ESP fat32 1MiB 1024MiB set 1 esp on mkpart root ext4 1024MiB 100%' >/dev/null
-$CONSOLE run 'mkfs.fat -F 32 -n boot /dev/vda1 >/dev/null 2>&1 && mkfs.ext4 -q -F -L nixos /dev/vda2' >/dev/null
-# mkfs returns before udev has created /dev/disk/by-label/*, so settle udev
-# before anything looks the labels up. We still mount by device path here
-# because it cannot race at all; the installed system mounts by label.
-$CONSOLE run 'udevadm settle --timeout=30' >/dev/null
-
-step "mounting"
-$CONSOLE run 'mount /dev/vda2 /mnt && mkdir -p /mnt/boot && mount -o umask=077 /dev/vda1 /mnt/boot && mountpoint -q /mnt && mountpoint -q /mnt/boot' >/dev/null
-
 step "pushing the flake to the installer"
-# The whole machine definition is the flake, so there is no
-# nixos-generate-config step: hosts/vm-aarch64/hardware-configuration.nix is
-# committed and mounts by LABEL, which install.sh sets below.
-#
-# Transfer is chunked base64 over the serial line: a tty in canonical mode
-# truncates lines past ~4096 bytes, and one line per file would exceed that.
-B64=$(cd "$VM_DIR/.." && COPYFILE_DISABLE=1 tar --no-xattrs -czf - \
+# Chunked base64 over the serial line: a tty in canonical mode truncates
+# lines past ~4096 bytes, so this cannot go in one write.
+B64=$(cd "$VM_DIR/.." && COPYFILE_DISABLE=1 tar --no-xattrs --exclude='./cli/target' --exclude='cli/target' -czf - \
         flake.nix flake.lock hosts modules config shell cli | base64 | tr -d '\n')
 echo "    payload: ${#B64} chars"
 $CONSOLE run 'rm -rf /tmp/kiwami && mkdir -p /tmp/kiwami && rm -f /tmp/k.b64' >/dev/null
@@ -51,24 +34,38 @@ for (( i=0; i<${#B64}; i+=2500 )); do
   $CONSOLE run "printf '%s' '${B64:$i:2500}' >> /tmp/k.b64" >/dev/null
 done
 $CONSOLE run 'base64 -d /tmp/k.b64 | tar xzf - -C /tmp/kiwami' >/dev/null
-LOCAL_SUM=$(cd "$VM_DIR/.." && cat flake.nix flake.lock hosts/vm-aarch64/*.nix modules/*.nix modules/home/*.nix config/*/* | shasum | cut -d' ' -f1)
-REMOTE_SUM=$($CONSOLE run 'cat /tmp/kiwami/flake.nix /tmp/kiwami/flake.lock /tmp/kiwami/hosts/vm-aarch64/*.nix /tmp/kiwami/modules/*.nix /tmp/kiwami/modules/home/*.nix /tmp/kiwami/config/*/* | sha1sum | cut -d" " -f1' | tr -d '[:space:]')
+LOCAL_SUM=$(cd "$VM_DIR/.." && find flake.nix flake.lock hosts modules config shell cli/src -type f | sort | xargs cat | shasum | cut -d' ' -f1)
+REMOTE_SUM=$($CONSOLE run 'cd /tmp/kiwami && find flake.nix flake.lock hosts modules config shell cli/src -type f | sort | xargs cat | sha1sum | cut -d" " -f1' | tr -d '[:space:]')
 [[ "$LOCAL_SUM" == "$REMOTE_SUM" ]] || { echo "flake transfer corrupted ($LOCAL_SUM != $REMOTE_SUM)"; exit 1; }
 echo "    checksum ok"
 
-step "installing from the flake (this is the slow part)"
-# The installer ISO ships with flakes DISABLED, so nixos-install --flake needs
-# them turned on explicitly for this shell.
+step "installing via kiwami install"
+# The installer under test is the one that ships. Previously this script
+# partitioned and formatted itself, which meant `just vm install` proved
+# nothing about `kiwami install` - two installers, guaranteed to drift.
+#
+# kiwami is built from the pushed flake rather than downloaded: that also
+# checks the package builds in the installer environment, which is what a
+# real `nixos-install --flake github:...` does. A custom ISO will ship the
+# binary and this step becomes a plain `kiwami install`.
 $CONSOLE run "nohup env NIX_CONFIG='experimental-features = nix-command flakes' \
-  nixos-install --flake /tmp/kiwami#${HOST} --no-root-passwd > /tmp/install.log 2>&1 &" >/dev/null
-for _ in $(seq 1 60); do
+  nix run /tmp/kiwami#kiwami -- install \
+    --disk /dev/vda --yes --force \
+    --flake /tmp/kiwami --host ${HOST} > /tmp/install.log 2>&1 &" >/dev/null
+
+for _ in $(seq 1 90); do
   sleep 10
   if $CONSOLE run 'grep -q "installation finished" /tmp/install.log && echo DONE' 2>/dev/null | grep -q DONE; then
     echo "    installation finished"; break
   fi
+  # Surface the installer's own refusals immediately rather than after 15min.
+  if $CONSOLE run 'grep -q "^install:" /tmp/install.log && echo REFUSED' 2>/dev/null | grep -q REFUSED; then
+    echo "    installer refused:"; $CONSOLE run 'grep "^install:" /tmp/install.log'; exit 1
+  fi
   printf '    still installing...\n'
 done
-$CONSOLE run 'grep -q "installation finished" /tmp/install.log' >/dev/null || { echo "install failed:"; $CONSOLE run 'tail -25 /tmp/install.log'; exit 1; }
+$CONSOLE run 'grep -q "installation finished" /tmp/install.log' >/dev/null || {
+  echo "install failed:"; $CONSOLE run 'tail -25 /tmp/install.log'; exit 1; }
 
 step "placing the repo in the user's home"
 # modules/home/hyprland.nix symlinks ~/.config/hypr into ~/kiwami/config, so

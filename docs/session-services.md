@@ -152,3 +152,13 @@ grep SigCgt /proc/<pid>/status     # 0000000100000800
 ```
 
 Bit 11 (`0x800`) is SIGUSR2. Set means the process installed a handler for it.
+
+
+## Trap 5: one serial console, one client
+
+QEMU's chardev socket accepts a single connection. Running `console.py` by hand
+while `install.sh` is mid-run steals the socket from it, and the script then
+sits waiting for output that is being delivered to someone else.
+
+Use `just vm ssh` to look at a guest that a script is currently driving over
+serial, or wait for it to finish.

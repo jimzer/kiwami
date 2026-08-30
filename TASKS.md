@@ -135,8 +135,8 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
       refusals, explicit confirmation before anything is written
 - [x] Test matrix (`just vm install-test`) — 13 checks over scratch disks
       including an NVMe, a partitioned disk and one too small
-- [ ] Drive `just vm install` through `kiwami install` instead of the fixed
-      `/dev/vda` script
+- [x] `just vm install` drives `kiwami install`, so the installer under test
+      is the one that ships. There is no second installer to drift.
 - [ ] One validation run on real firmware (vendor UEFI quirks are the part a
       VM cannot model)
 
