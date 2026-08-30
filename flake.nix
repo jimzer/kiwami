@@ -119,6 +119,15 @@
                   "su nixos -c 'KIWAMI_REPO=/nonexistent kiwami theme list' | grep -q kiwami"
               )
 
+              # A flapping unit still matches pgrep, so assert it is not
+              # restarting. This is the check that would have caught the
+              # shell being broken in CI for two green runs.
+              machine.succeed(
+                  "su nixos -c 'XDG_RUNTIME_DIR=/run/user/1000 "
+                  "systemctl --user show -p NRestarts --value kiwami-shell.service'"
+                  " | grep -qE '^[0-3]$'"
+              )
+
               # Stronger than a screenshot: ask the compositor whether the
               # shell actually mapped a layer surface. A process being alive
               # only proves it started, not that it drew anything.

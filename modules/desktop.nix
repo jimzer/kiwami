@@ -63,6 +63,10 @@
   # editing a theme live keeps working.
   environment.etc."kiwami/themes".source = ../config/themes;
 
+  # The shell tree ships too, for the same reason: an installed machine has no
+  # checkout, and pointing the unit at one made it restart-loop forever.
+  environment.etc."kiwami/shell".source = ../shell;
+
   security.polkit.enable = true;
   services.dbus.enable = true;
   xdg.portal = {

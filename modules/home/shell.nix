@@ -14,8 +14,18 @@ let
   quickshell = pkgs.quickshell;
   kiwami = inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.kiwami;
 
-  # The shell tree lives in the working copy so edits are live.
-  shellDir = "%h/kiwami/shell";
+  # Prefer the working tree so edits stay live, but fall back to the system
+  # copy. Pointing the unit straight at the checkout meant an installed
+  # machine restart-looped on "Could not open config file" - and CI reported
+  # that as passing, because a process restarting 48 times still matches
+  # pgrep. Resolved at start time, not build time, since whether a checkout
+  # exists is a property of the machine.
+  launcher = pkgs.writeShellScript "kiwami-shell" ''
+    tree="$HOME/kiwami/shell"
+    [ -f "$tree/shell.qml" ] || tree=/etc/kiwami/shell
+    echo "kiwami-shell: using $tree"
+    exec ${lib.getExe quickshell} -p "$tree"
+  '';
 in
 {
   home.packages = [ quickshell ];
@@ -46,7 +56,7 @@ in
       # `just vm push` does rm -rf + extract, so a file watcher would fire
       # mid-write and reload against a half-written tree. Restart deliberately.
       Environment = [ "QS_DISABLE_FILE_WATCHER=1" ];
-      ExecStart = "${lib.getExe quickshell} -p ${shellDir}";
+      ExecStart = toString launcher;
       Restart = "always";
       RestartSec = 2;
     };
