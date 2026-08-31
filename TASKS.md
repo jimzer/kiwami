@@ -104,8 +104,12 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 - [~] **`kiwami` CLI** — Rust, built by the flake as `packages.<system>.kiwami`.
       Has `theme list/current/set` and `commands --json`. Still to do:
       `update`, `rollback`, `doctor`
-- [ ] **`kiwami doctor`** — strays in `~/.local/bin`, `npm -g`, `cargo install`,
-      and `nix profile list` must be empty (declarative-only invariant)
+- [x] **`kiwami doctor`** — drift (imperative nix installs, stray binaries,
+      language-manager globals), health (failed units, flapping shell,
+      graphical-session, theme applied, entry points still managed) and
+      hygiene (generations, flake.lock age). Exits non-zero on problems.
+- [ ] `kiwami doctor` impermanence readiness — report paths that would be lost
+      on reboot, once a persist list exists
 - [x] **Power menu** — lock/suspend/logout/reboot/shutdown, `SUPER+SHIFT+P`,
       keyboard and mouse nav; also offered in the launcher via the CLI
 - [x] **Tray** — StatusNotifierItem, left-click activates, right-click menu.

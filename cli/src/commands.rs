@@ -45,6 +45,13 @@ pub fn all() -> Vec<Entry> {
     }
 
     out.push(Entry {
+        name: "System: doctor".into(),
+        description: "Check for drift and desktop health".into(),
+        exec: vec!["ghostty".into(), "-e".into(), "sh".into(), "-c".into(),
+                   "kiwami doctor; read -p 'press enter'".into()],
+    });
+
+    out.push(Entry {
         name: "Shell: restart".into(),
         description: "Restart the Kiwami shell".into(),
         exec: vec![

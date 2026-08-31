@@ -1,4 +1,5 @@
 mod commands;
+mod doctor;
 mod install;
 mod paths;
 mod theme;
@@ -39,6 +40,8 @@ enum Cmd {
     },
     /// List disks the installer can see, and exit
     Disks,
+    /// Report drift from the declared config, and check the desktop is healthy
+    Doctor,
     /// Emit the actions the launcher should offer, as JSON
     Commands {
         /// Currently the only supported format; present so the shape is explicit.
@@ -103,6 +106,11 @@ fn main() -> std::process::ExitCode {
             };
             if let Err(e) = install::run_install(opts) {
                 eprintln!("\ninstall: {e}");
+                return std::process::ExitCode::FAILURE;
+            }
+        }
+        Cmd::Doctor => {
+            if doctor::run().is_err() {
                 return std::process::ExitCode::FAILURE;
             }
         }

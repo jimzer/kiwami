@@ -27,6 +27,7 @@ any future image.
 ```bash
 kiwami install             # install to a disk (from the live ISO)
 kiwami disks               # what the installer can see
+kiwami doctor              # drift + health; non-zero exit on problems
 kiwami theme list          # available themes, active one marked
 kiwami theme set midnight  # switch, regenerate, retint everything
 kiwami commands --json     # actions the launcher should offer
