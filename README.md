@@ -106,6 +106,7 @@ just vm rebuild      # push + nixos-rebuild switch
 just vm screenshot x
 just vm doctor       # or: just vm ssh 'kiwami doctor'
 just vm install-test # installer matrix
+just check           # lint + evaluate every host and the boot test (~16s)
 ```
 
 The VM is aarch64 so it runs natively under HVF on Apple silicon. CI builds

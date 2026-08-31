@@ -164,5 +164,6 @@ variants · anything that assumes a user who will not write Nix
 - Detected modules follow whatever QEMU has attached, so `kiwami doctor`
   reports drift on the dev VM whenever scratch disks are added or removed.
   Correct, but noisy — it is the check working, not a bug
-- `just check` lints shell/python/just only. It does **not** evaluate Nix,
-  which is why a deleted module went unnoticed until CI failed
+- CI has no Nix cache. Magic Nix Cache was shut down, so the action only
+  emitted an auth error; runs rebuild our own derivations each time (~2.5min,
+  acceptable). `cache-nix-action` is the option if that ever hurts

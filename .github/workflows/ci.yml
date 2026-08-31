@@ -17,20 +17,29 @@ jobs:
     name: evaluate
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
 
       - name: flake metadata is well formed
         run: nix flake metadata --no-write-lock-file
 
+      # Asks the flake which hosts exist rather than repeating the list.
+      # hosts/ is a directory listing now, so a hardcoded loop here would
+      # quietly stop covering any machine added after it was written.
       - name: every host evaluates
         run: |
-          for host in vm-aarch64 vm-x86_64; do
+          hosts=$(nix eval --json '.#nixosConfigurations' --apply builtins.attrNames | jq -r '.[]')
+          echo "hosts: $hosts"
+          for host in $hosts; do
             echo "==> $host"
             nix eval --raw ".#nixosConfigurations.$host.config.system.build.toplevel.drvPath"
             echo
           done
+
+      # The nixosTest is built in another job; evaluating it here means a
+      # broken import in the test surfaces in 60s instead of after a VM boot.
+      - name: the desktop test evaluates
+        run: nix eval --raw '.#checks.x86_64-linux.desktop.drvPath'
 
   # The Mac cannot build Linux, so this is the first place the CLI and the
   # system closure are actually compiled for the architecture the real
@@ -39,9 +48,8 @@ jobs:
     name: build x86_64
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
 
       - name: kiwami CLI
         run: nix build .#packages.x86_64-linux.kiwami --print-build-logs
@@ -61,9 +69,8 @@ jobs:
     name: desktop boots
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: DeterminateSystems/nix-installer-action@main
-      - uses: DeterminateSystems/magic-nix-cache-action@main
 
       - name: KVM availability
         run: |
