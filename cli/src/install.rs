@@ -10,6 +10,8 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use crate::net;
+
 /// Refuse anything smaller than this. Below it the install fails partway
 /// through, which is worse than refusing up front.
 const MIN_BYTES: u64 = 20 * 1024 * 1024 * 1024;
@@ -166,7 +168,10 @@ fn run(cmd: &str, args: &[&str]) -> Result<(), String> {
 
 pub struct Options {
     pub disk: Option<String>,
-    pub host: String,
+    /// Host attribute to install. Resolved against the flake, and prompted
+    /// for when omitted - there is no sensible default, and guessing one
+    /// means discovering it was wrong after the disk is already erased.
+    pub host: Option<String>,
     pub flake: String,
     pub assume_yes: bool,
     pub force: bool,
@@ -187,6 +192,20 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     if !is_root() {
         return Err("must run as root (try: sudo kiwami install)".into());
     }
+
+    // The install downloads its whole closure from the binary cache, so this
+    // has to pass before anything else. `--yes` implies unattended, and an
+    // unattended run must not sit on a wifi password prompt.
+    println!("==> checking network");
+    net::ensure(!opts.assume_yes)?;
+
+    // Resolve the host now, while the disk is still intact. This costs one
+    // cheap eval - `builtins.attrNames` does not force the configurations -
+    // and it is the difference between "unknown host" and "unknown host,
+    // reported after your disk was erased".
+    println!("==> resolving {}", opts.flake);
+    let host = resolve_host(&opts.flake, opts.host.clone(), opts.assume_yes)?;
+    println!("    host: {host}");
 
     let disks = disks().map_err(|e| format!("cannot enumerate disks: {e}"))?;
     if disks.is_empty() {
@@ -234,7 +253,7 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     mount(&target.path)?;
 
     println!("==> installing {} (this takes a while)", opts.flake);
-    let flake_ref = format!("{}#{}", opts.flake, opts.host);
+    let flake_ref = format!("{}#{}", opts.flake, host);
     run("nixos-install", &["--flake", &flake_ref, "--no-root-passwd"])?;
 
     println!("\n==> done. Reboot into the installed system.");
@@ -342,6 +361,71 @@ fn is_root() -> bool {
         })
         .map(|uid| uid == "0")
         .unwrap_or(false)
+}
+
+/// The hosts this flake can install, straight from the flake itself.
+///
+/// `--extra-experimental-features` is passed explicitly because the stock
+/// installer ISO does not enable flakes, and the failure without it is an
+/// unhelpful "experimental feature not enabled" from a command the user
+/// never typed.
+fn flake_hosts(flake: &str) -> Result<Vec<String>, String> {
+    let out = Command::new("nix")
+        .args([
+            "--extra-experimental-features",
+            "nix-command flakes",
+            "eval",
+            "--json",
+            &format!("{flake}#nixosConfigurations"),
+            "--apply",
+            "builtins.attrNames",
+        ])
+        .output()
+        .map_err(|e| format!("cannot run nix: {e}"))?;
+
+    if !out.status.success() {
+        return Err(format!(
+            "cannot read hosts from {flake}:\n{}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+
+    serde_json::from_slice(&out.stdout).map_err(|e| format!("unexpected output from nix: {e}"))
+}
+
+fn resolve_host(flake: &str, want: Option<String>, assume_yes: bool) -> Result<String, String> {
+    let hosts = flake_hosts(flake)?;
+    if hosts.is_empty() {
+        return Err(format!("{flake} defines no hosts"));
+    }
+
+    if let Some(want) = want {
+        return if hosts.contains(&want) {
+            Ok(want)
+        } else {
+            Err(format!("no such host: {want}\nAvailable: {}", hosts.join(", ")))
+        };
+    }
+
+    if assume_yes {
+        return Err(format!(
+            "--yes needs an explicit --host.\nAvailable: {}",
+            hosts.join(", ")
+        ));
+    }
+
+    println!("\nHosts:\n");
+    for (i, h) in hosts.iter().enumerate() {
+        println!("  {}) {h}", i + 1);
+    }
+    loop {
+        let answer = prompt(&format!("\nInstall which host? [1-{}] ", hosts.len()))
+            .map_err(|e| e.to_string())?;
+        match answer.parse::<usize>() {
+            Ok(n) if n >= 1 && n <= hosts.len() => return Ok(hosts[n - 1].clone()),
+            _ => println!("Enter a number between 1 and {}.", hosts.len()),
+        }
+    }
 }
 
 /// Print the detected disks and exit. Used by tests and by anyone wondering

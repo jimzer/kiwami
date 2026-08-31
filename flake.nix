@@ -58,6 +58,12 @@
           # happen to be present; everywhere else they are not, and the
           # installer would fail partway through with "command not found"
           # after it had already started writing. Carry them explicitly.
+          #
+          # nmcli is deliberately NOT here. It is a client for a running
+          # NetworkManager daemon, so bundling it would add NM's whole closure
+          # to every desktop for a binary that is useless without the service
+          # - and a bundled client can skew from the daemon it talks to.
+          # `kiwami net` looks it up on PATH and says so when it is missing.
           postInstall = ''
             wrapProgram $out/bin/kiwami --prefix PATH : ${pkgs.lib.makeBinPath (with pkgs; [
               parted
@@ -65,6 +71,7 @@
               e2fsprogs       # mkfs.ext4
               util-linux      # mount
               systemd         # udevadm
+              curl            # the "am I online" probe
             ])}
           '';
         };

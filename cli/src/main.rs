@@ -1,6 +1,7 @@
 mod commands;
 mod doctor;
 mod install;
+mod net;
 mod paths;
 mod theme;
 
@@ -25,9 +26,9 @@ enum Cmd {
         /// Target disk, e.g. /dev/nvme0n1. Prompts if omitted.
         #[arg(long)]
         disk: Option<String>,
-        /// Host attribute in the flake to install
-        #[arg(long, default_value = "desktop")]
-        host: String,
+        /// Host attribute in the flake to install. Prompts if omitted.
+        #[arg(long)]
+        host: Option<String>,
         /// Flake to install from
         #[arg(long, default_value = "github:jimzer/kiwami")]
         flake: String,
@@ -40,6 +41,12 @@ enum Cmd {
     },
     /// List disks the installer can see, and exit
     Disks,
+    /// Get online: reports if already connected, otherwise offers wifi
+    Net {
+        /// Report what is visible and exit; change nothing
+        #[arg(long)]
+        status: bool,
+    },
     /// Report drift from the declared config, and check the desktop is healthy
     Doctor,
     /// Emit the actions the launcher should offer, as JSON
@@ -112,6 +119,17 @@ fn main() -> std::process::ExitCode {
         Cmd::Doctor => {
             if doctor::run().is_err() {
                 return std::process::ExitCode::FAILURE;
+            }
+        }
+        Cmd::Net { status } => {
+            let r = if status { net::status() } else { net::ensure(true) };
+            match r {
+                Ok(()) if !status => println!("network: online"),
+                Ok(()) => {}
+                Err(e) => {
+                    eprintln!("net: {e}");
+                    return std::process::ExitCode::FAILURE;
+                }
             }
         }
         Cmd::Disks => {

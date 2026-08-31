@@ -74,6 +74,7 @@ Widgets resolve by filename: add `shell/widgets/Weather.qml`, name it in
 ```bash
 kiwami install             # install to a disk, from the live ISO
 kiwami disks               # what the installer can see
+kiwami net                 # get online; offers a wifi menu if needed
 kiwami theme list / set    # switch theme, no rebuild
 kiwami doctor              # drift + health; non-zero exit on problems
 kiwami commands --json     # actions the launcher offers

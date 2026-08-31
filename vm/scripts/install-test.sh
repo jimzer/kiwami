@@ -14,6 +14,12 @@ DIR="$(cd "$(dirname "$0")" && pwd)"
 SSH="$DIR/vmssh"
 pass=0; fail=0
 
+# Every run that gets past the root gate now resolves --host against a flake,
+# so the checks below point at the pushed tree (`just vm push`) rather than
+# GitHub: it keeps the matrix offline-clean and fast.
+FLAKE="/home/nixos/kiwami"
+K="sudo kiwami install --force --flake $FLAKE --host vm-aarch64"
+
 check() {           # check <name> <expected-substring> <command...>
   local name="$1" want="$2"; shift 2
   local got; got=$("$SSH" "$@" 2>&1)
@@ -28,6 +34,10 @@ check() {           # check <name> <expected-substring> <command...>
 
 echo "installer matrix"
 
+# --- network -------------------------------------------------------------
+check "net reports the probe result"   "cache.nixos.org" 'kiwami net --status'
+check "net reports NetworkManager"     "NetworkManager"  'kiwami net --status'
+
 # --- detection -----------------------------------------------------------
 check "lists the NVMe disk"            "/dev/nvme0n1"  'kiwami disks'
 check "hides the NVMe controller alias" ""             'kiwami disks | grep -c "nvme0c" | grep -q "^0$" && echo ""'
@@ -40,22 +50,30 @@ check "refuses on an installed system" "not the installer ISO" \
 check "refuses without root"           "must run as root" \
   'kiwami install --force --disk /dev/nvme0n1 --yes'
 check "refuses a disk that is too small" "needs at least 20 GiB" \
-  'sudo kiwami install --force --disk /dev/vdc --yes'
+  "$K --disk /dev/vdc --yes"
 check "refuses an unknown disk"        "no such disk" \
-  'sudo kiwami install --force --disk /dev/nope --yes'
+  "$K --disk /dev/nope --yes"
+check "refuses an unknown host"        "no such host" \
+  "sudo kiwami install --force --flake $FLAKE --host nope --disk /dev/vdc --yes"
+check "names the hosts it does have"   "vm-aarch64" \
+  "sudo kiwami install --force --flake $FLAKE --host nope --disk /dev/vdc --yes"
+check "--yes will not guess a host"    "needs an explicit --host" \
+  "sudo kiwami install --force --flake $FLAKE --disk /dev/vdc --yes"
 
 # --- prompts -------------------------------------------------------------
 check "warns before erasing a non-empty disk" "Everything on it will be destroyed" \
-  'sudo kiwami install --force --disk /dev/vdb --yes 2>&1 | head -8'
+  "$K --disk /dev/vdb --yes 2>&1 | head -12"
 check "offers a numbered disk menu"    "Install to which disk?" \
-  'printf "1\nno\n" | sudo kiwami install --force'
+  "printf '1\nno\n' | $K"
 check "rejects an out-of-range choice" "Enter a number between" \
-  'printf "99\n1\nno\n" | sudo kiwami install --force'
+  "printf '99\n1\nno\n' | $K"
+check "offers a numbered host menu"    "Install which host?" \
+  "printf '1\n1\nno\n' | sudo kiwami install --force --flake $FLAKE"
 
 # --- the one that matters ------------------------------------------------
 BEFORE=$("$SSH" 'lsblk -no NAME /dev/vdb | tr "\n" " "' 2>/dev/null)
 check "cancelling reports nothing written" "nothing was written" \
-  'echo "no" | sudo kiwami install --force --disk /dev/vdb'
+  "echo no | $K --disk /dev/vdb"
 AFTER=$("$SSH" 'sudo udevadm settle; lsblk -no NAME /dev/vdb | tr "\n" " "' 2>/dev/null)
 if [[ "$BEFORE" == "$AFTER" && -n "$BEFORE" ]]; then
   printf '  \033[32mPASS\033[0m  cancelling leaves the disk untouched\n'; pass=$((pass + 1))

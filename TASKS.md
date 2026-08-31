@@ -69,11 +69,12 @@ notifications, theme pipeline with live retint.
 which rejects at eval the malformed value that once shipped. Bar composes from
 a generated manifest; widgets resolve by filename.
 
-**CLI** — `install` (disk detection, selection, refusals, confirmation),
-`theme`, `doctor`, `commands --json`.
+**CLI** — `install` (network gate, host resolution against the flake, disk
+detection, refusals, confirmation), `net`, `theme`, `doctor`,
+`commands --json`.
 
 **Harness** — 3-minute unattended install, QMP/serial/SSH channels,
-snapshot/reset, installer matrix (13 checks), CI on x86_64 (evaluate, build,
+snapshot/reset, installer matrix (19 checks), CI on x86_64 (evaluate, build,
 boot test with screenshots).
 
 ---
@@ -88,12 +89,41 @@ boot test with screenshots).
 - [ ] Copy on select. Paste needs synthetic input and stays a flag, never a
       promise
 
+### Generated hardware config
+The installer can only install a host somebody already hand-wrote. Real
+hardware needs the initrd module list detected, not guessed.
+
+- [ ] `nixos-generate-config --root /mnt --show-hardware-config
+      --no-filesystems` into `hosts/<name>/hardware.nix`. `--show-hardware-config`
+      keeps the unwanted `configuration.nix` template off the disk;
+      `--no-filesystems` emits no UUIDs, so the file survives a reformat and
+      the VM's hand-written by-label config can be deleted
+- [ ] Move the by-label `fileSystems` into a shared `modules/disk-layout.nix`
+      — `install.rs` owns the labels, so no host should be restating them
+- [ ] `git add` the generated file. Flakes enumerate via git; an untracked
+      file is invisible to the build even though `ls` shows it. This is the
+      step whose absence produces a baffling error weeks later
+- [ ] Scaffold `hosts/<name>/default.nix` from a template when the directory
+      does not exist
+- [ ] Make `nixosConfigurations` read `hosts/` with `builtins.readDir` and drop
+      the explicit `system` argument from `mkHost` — `nixosSystem` infers it
+      from the generated `nixpkgs.hostPlatform`. Then adding a machine is
+      creating a directory, and nothing edits `flake.nix`
+- [ ] `doctor`: diff the committed hardware config against a fresh
+      `--show-hardware-config`. Generated output is a snapshot of install day,
+      so swapping a disk makes it silently wrong
+
 ### Custom ISO
 - [ ] `nixosConfigurations.installer` from `installation-cd-minimal.nix`, with
       `kiwami` baked in and flakes enabled
-- [ ] Carry the flake rather than fetch it — an installer that needs DHCP to
-      work is a bad installer
 - [ ] Autologin into the installer
+- [ ] Do **not** bake the flake source: `git clone` gives the same writable
+      working tree and is never stale. Baking would not buy an offline
+      install anyway — the closure still comes from the binary cache
+- [ ] Offline install, if wanted at all, is a *separate* variant:
+      `isoImage.storeContents = [ <target>.config.system.build.toplevel ]`
+      puts the whole closure on the ISO. Costs a multi-GB image pinned to one
+      revision, so it must not be the default
 - [ ] Build in CI (x86_64 cannot be built on the Mac); boot it in the VM and
       run the existing matrix against it
 
@@ -137,4 +167,10 @@ variants · anything that assumes a user who will not write Nix
 - CI's boot test asserts the desktop comes up; it does not check that widgets
   render correctly
 - `vm/scripts/install.sh` is verified only against the aarch64 QEMU guest
+- `kiwami net`'s wifi path is unexercised: the VM has no wireless device, so
+  only the online case, the offline refusal and the nmcli-missing branch are
+  covered. Hidden SSIDs and WPA-Enterprise deliberately defer to `nmtui`
+- NetworkManager is not enabled on the installed system, only on the ISO, so
+  `kiwami net` can report status there but cannot connect. Fine for the VM
+  (scripted DHCP); a laptop will need `networking.networkmanager.enable`
 - The VM has no GPU (llvmpipe): validates layout and logic, not animation
