@@ -31,6 +31,13 @@ let
 
   # What the shell reads to lay itself out. Generated rather than hardcoded in
   # QML so `kiwami.bar.right = [...]` in a consumer's flake actually moves things.
+  # Ghostty writes booleans as true/false and everything else bare.
+  renderGhostty = key: value:
+    "${key} = ${
+      if lib.isBool value then (if value then "true" else "false")
+      else toString value
+    }";
+
   barManifest = builtins.toJSON {
     inherit (cfg.bar) enable position height left center right;
     defaultTheme = cfg.theme.name;
@@ -42,16 +49,8 @@ in
     "kiwami/shell".source = ../shell;
 
     "kiwami/config/ghostty/defaults".text = ''
-      # Generated from kiwami.terminal.*. Do not edit; set the options instead.
-      font-family = ${cfg.terminal.font}
-      font-size = ${toString cfg.terminal.fontSize}
-
-      window-padding-x = 10
-      window-padding-y = 8
-      window-decoration = false
-      cursor-style = block
-      confirm-close-surface = false
-      scrollback-limit = 100000
+      # Generated from kiwami.terminal.settings. Do not edit; set the options.
+      ${lib.concatStringsSep "\n" (lib.mapAttrsToList renderGhostty cfg.terminal.settings)}
 
       ${cfg.terminal.extraConfig}
     '';

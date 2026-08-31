@@ -92,14 +92,15 @@ in
     };
 
     terminal = {
-      font = mkOption {
-        type = types.str;
-        default = "JetBrainsMono Nerd Font";
-      };
-
-      fontSize = mkOption {
-        type = types.ints.positive;
-        default = 11;
+      settings = mkOption {
+        type = types.attrsOf (types.oneOf [ types.str types.int types.bool ]);
+        default = { };
+        example = { font-size = 14; cursor-style = "bar"; };
+        description = ''
+          Ghostty settings, rendered to its config format. Every key our
+          defaults set uses mkDefault, so overriding one from a consumer flake
+          replaces just that key and leaves the rest.
+        '';
       };
 
       extraConfig = mkOption {
