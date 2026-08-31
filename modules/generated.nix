@@ -50,55 +50,5 @@ in
 
     # Ours, a real Ghostty file rather than generated - same treatment as the
     # Hyprland Lua, and for the same reason: it reads better in its own syntax.
-    "kiwami/config/ghostty/defaults".source = ../config/ghostty/defaults;
-
-    # Only what a consumer set, plus free-form lines. Usually empty.
-    "kiwami/config/ghostty/nix".text = ''
-      # Generated from kiwami.terminal.settings and .extraConfig.
-      ${lib.concatStringsSep "\n" (lib.mapAttrsToList renderGhostty cfg.terminal.settings)}
-
-      ${cfg.terminal.extraConfig}
-    '';
-
-    "kiwami/config/hypr/kiwami.lua".source = ../config/hypr/hyprland.lua;
-
-    "kiwami/config/hypr/extra.lua".text = ''
-      -- Generated from kiwami.hyprland.extraConfig.
-      ${cfg.hyprland.extraConfig}
-    '';
-
-    # The file ~/.config/hypr/hyprland.lua points at. Deliberately thin: it is
-    # the one file the user owns and we can never rewrite, so everything we
-    # might want to improve lives behind these two loads, not in here.
-    "kiwami/config/hypr/aggregator.lua".text = ''
-      -- Kiwami Hyprland entry point.
-      local function load(path)
-        local ok, err = pcall(dofile, path)
-        if not ok then
-          print("kiwami: " .. tostring(err))
-        end
-      end
-
-      load("/etc/kiwami/config/hypr/kiwami.lua")   -- distro config
-      load("/etc/kiwami/config/hypr/extra.lua")    -- kiwami.hyprland.extraConfig
-
-      -- Yours, loaded last so it wins. Optional.
-      local home = os.getenv("HOME")
-      local mine = home .. "/.config/hypr/mine.lua"
-      local f = io.open(mine, "r")
-      if f then f:close(); load(mine) end
-    '';
-
-    # Ghostty resolves includes after the containing file and the last include
-    # wins, so layering is expressed purely by this order. Verified: inline
-    # values lose to any include, regardless of position in the file.
-    "kiwami/config/ghostty/config".text = ''
-      # Kiwami Ghostty entry point. Put your own settings in
-      # ~/.config/ghostty/overrides - it is loaded last and wins.
-      config-file = ?/etc/kiwami/config/ghostty/defaults
-      config-file = ?~/.local/state/kiwami/current/theme/ghostty.conf
-      config-file = ?/etc/kiwami/config/ghostty/nix
-      config-file = ?~/.config/ghostty/overrides
-    '';
   };
 }

@@ -14,7 +14,7 @@
   # Home Manager: package layer and dotfile links only, per the design note.
   home-manager.users.nixos = {
     imports = [
-      ../../modules/home/dotfiles.nix
+      ../../modules/home/configs.nix
       ../../modules/home/shell.nix
     ];
     home.stateVersion = "26.05";

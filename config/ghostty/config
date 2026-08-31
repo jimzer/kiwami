@@ -1,9 +1,9 @@
 # Kiwami Ghostty configuration.
-# Plain config file — edit and restart the terminal, no rebuild.
-
-# Colours come from the active theme. The `?` makes it optional so a machine
-# with no theme applied yet still starts. Ghostty re-reads on SIGUSR2, which is
-# what kiwami-theme sends.
+#
+# Edit this file in the flake and rebuild. Colours are not here: they come
+# from the active theme, which `kiwami theme set` regenerates without a
+# rebuild. The `?` makes the include optional so a machine with no theme
+# applied still starts.
 config-file = ?~/.local/state/kiwami/current/theme/ghostty.conf
 
 font-family = JetBrainsMono Nerd Font
@@ -13,8 +13,6 @@ window-padding-x = 10
 window-padding-y = 8
 window-decoration = false
 
-# Hyprland draws the borders; let the terminal stay flat.
-background-opacity = 1.0
 cursor-style = block
 confirm-close-surface = false
 

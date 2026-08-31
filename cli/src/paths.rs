@@ -13,14 +13,11 @@ pub fn home() -> PathBuf {
     std::env::var_os("HOME").map(PathBuf::from).expect("HOME unset")
 }
 
-/// Where to look for themes, most specific first.
-///
-/// The working tree wins so a theme can be edited live, but it must not be
-/// *required*: an installed machine has no checkout, and CI found this by
-/// failing with "cannot read ~/kiwami/config/themes". The system copy is
-/// installed by modules/desktop.nix from the same directory.
+/// Where to look for themes. Generated into /etc from kiwami.theme.themes.
 pub fn theme_search_paths() -> Vec<PathBuf> {
-    let mut paths = vec![repo().join("config/themes")];
+    // Themes come from the flake. The only other entry is the checkout, so a
+    // developer sees their edits without a rebuild.
+    let mut paths = Vec::new();
     if let Some(sys) = std::env::var_os("KIWAMI_THEMES") {
         paths.push(PathBuf::from(sys));
     }

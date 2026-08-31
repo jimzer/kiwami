@@ -7,7 +7,6 @@
 
 use std::fmt;
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::paths;
@@ -285,37 +284,6 @@ fn theme_applied() -> Finding {
     }
 }
 
-fn entry_points() -> Finding {
-    let home = paths::home();
-    let expected: [(PathBuf, &str); 2] = [
-        (home.join(".config/ghostty/config"), "/etc/kiwami/config/ghostty/config"),
-        (home.join(".config/hypr/hyprland.lua"), "/etc/kiwami/config/hypr/aggregator.lua"),
-    ];
-
-    let mut detached = Vec::new();
-    for (path, target) in expected.iter() {
-        if !path.exists() {
-            continue;
-        }
-        let points_at_us = fs::read_link(path)
-            .map(|t| t == Path::new(target))
-            .unwrap_or(false);
-        if !points_at_us {
-            detached.push(format!("{}", path.display()));
-        }
-    }
-
-    if detached.is_empty() {
-        Finding::new(Level::Ok, "config entry points still managed")
-    } else {
-        // Not a failure: taking over the file is a legitimate choice. But it
-        // silently opts out of every future improvement, which is worth saying.
-        Finding::new(Level::Warn, format!("{} entry point(s) replaced", detached.len()))
-            .detail(detached.join("\n"))
-            .remedy("these no longer receive distro updates; delete to restore")
-    }
-}
-
 // --- hygiene -------------------------------------------------------------
 
 fn generations() -> Finding {
@@ -370,7 +338,6 @@ pub fn run() -> Result<(), ()> {
             graphical_session(),
             shell_unit(),
             theme_applied(),
-            entry_points(),
         ]),
         ("hygiene", vec![generations(), lock_age()]),
     ];

@@ -24,14 +24,19 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
   real files placed read-only into `/etc` by Nix. Generating them from Nix
   attrsets cost three mechanisms to express eight lines and bought nothing a
   user could see.
-- **Three roots, one owner each.** `/etc/kiwami` is the distro's (read-only,
-  replaced wholesale on update); `~/.config/…` is the user's (never touched);
-  `~/.local/state/kiwami` is generated. They are joined by the app's own
-  include mechanism — Ghostty's `config-file`, Hyprland's `dofile` — so
-  improving a default never has to touch a user's file.
-- **Entry points are symlinks into `/etc`, not seeded copies.** So we can change the
-  structure itself — add an include, load a new module — and every machine
-  picks it up. Omarchy seeds a real file and needs `migrations/` for this.
+- **One source of truth: the flake.** Configs are placed by Home Manager as
+  read-only store symlinks; you change one by editing it in the flake and
+  rebuilding. There is no `~/.config` override layer, because the user who
+  needed it — someone who will not write Nix — is not the audience.
+  Measured cost of that choice: 8.2s to change a config versus 0.76s to
+  restart the shell, so the checkout is still preferred for QML during
+  development.
+- **The option surface is for multiple machines, not multiple users.**
+  `kiwami.bar.position` is how a laptop differs from a desktop without forking
+  a QML file, and what someone importing `nixosModules.default` overrides.
+- **Themes stay runtime.** Authored as typed Nix, generated to JSON, switched
+  by `kiwami theme set` with no rebuild — the one runtime hook that earns its
+  place, because designing a palette wants instant feedback.
 - **CLI is thin.** On NixOS `nixos-rebuild` does the real work, so `kiwami` is a
   wrapper, not a package manager.
 - **Dev VM is aarch64**, native under HVF. Architecture is irrelevant for bar
@@ -150,14 +155,13 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 
 ## Shell customisation  `[x] DONE`
 
-- [x] Widgets resolve by filename, so a user can add `widgets/Weather.qml` and
-      name it in `kiwami.bar.right` without us knowing it exists
-- [x] Merged tree built at shell start: ships/checkout first, then
-      `~/.config/kiwami/shell` shadowing by filename
+- [x] Widgets resolve by filename, so adding `widgets/Weather.qml` and naming
+      it in `kiwami.bar.right` is all it takes
 - [x] Error isolation at both levels — a broken widget costs that slot, a
       broken top-level component costs that piece, neither kills the shell
-- [x] `kiwami shell list` / `clone`, with clone recording a digest so list can
-      flag an override whose shipped version has moved on
+- [~] The `~/.config` override layer was built and then removed. It existed
+      for a user who does not write Nix, and that user does not exist here.
+      What it cost: stale overrides, detached symlinks, three separate bugs.
 
 ## Tier 3 — Differentiators
 

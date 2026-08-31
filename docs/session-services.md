@@ -177,6 +177,8 @@ boot) and not in ones taken later.
 
 
 ## Trap 6: atomic writes detach a managed symlink
+*(historical - Kiwami no longer seeds files into `~/.config`, so nothing can
+detach. Kept because the hazard applies to any symlink-into-store pattern.)*
 
 `~/.config/ghostty/config` is a symlink into `/etc`, and `/nix/store` is
 read-only, so it cannot be edited through. But:
@@ -201,6 +203,8 @@ to.
 
 
 ## Shadowing: two things that bite
+*(historical - the user-override layer was removed. Both lessons still apply
+to any Loader-based composition.)*
 
 The shell loads a merged tree - what ships (or a checkout) first, then
 `~/.config/kiwami/shell` overwriting by filename. Two failure modes came out
