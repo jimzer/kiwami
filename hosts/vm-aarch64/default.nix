@@ -1,17 +1,16 @@
 # The aarch64 development VM that runs on the Mac under QEMU/HVF.
+#
+# The choices half of a machine: what it is called, who has an account, how it
+# boots. The facts half is hardware.nix, and the shared Kiwami desktop comes
+# from nixosModules.default, which mkHost adds to every host.
 { pkgs, ... }:
 
 {
   imports = [
-    ./hardware-configuration.nix
-    ../../modules/common.nix
-    ../../modules/desktop.nix
-    ../../modules/options.nix
-    ../../modules/themes.nix
-    ../../modules/generated.nix
+    ./hardware.nix
+    ../../modules/disk-layout.nix
   ];
 
-  # Home Manager: package layer and dotfile links only, per the design note.
   home-manager.users.nixos = {
     imports = [
       ../../modules/home/configs.nix

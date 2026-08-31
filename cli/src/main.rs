@@ -38,6 +38,12 @@ enum Cmd {
         /// Allow running on an already-installed system
         #[arg(long)]
         force: bool,
+        /// Scaffold hosts/<name>/ when the flake does not define it yet
+        #[arg(long)]
+        new: bool,
+        /// Re-detect hardware even if hardware.nix is already committed
+        #[arg(long)]
+        regen_hardware: bool,
     },
     /// List disks the installer can see, and exit
     Disks,
@@ -103,13 +109,15 @@ fn main() -> std::process::ExitCode {
                 }
             },
         },
-        Cmd::Install { disk, host, flake, yes, force } => {
+        Cmd::Install { disk, host, flake, yes, force, new, regen_hardware } => {
             let opts = install::Options {
                 disk,
                 host,
                 flake,
                 assume_yes: yes,
                 force,
+                new_host: new,
+                regen_hardware,
             };
             if let Err(e) = install::run_install(opts) {
                 eprintln!("\ninstall: {e}");

@@ -323,6 +323,116 @@ fn lock_age() -> Finding {
     }
 }
 
+/// The committed hardware facts are a snapshot of install day, not a live
+/// query. Move the disk to another machine, swap the wifi card, and the file
+/// keeps describing the old one - which fails at the worst moment, in the
+/// initrd, with no shell to debug from. So re-ask the machine and diff.
+fn hardware_drift() -> Finding {
+    let repo = paths::repo();
+    if !repo.join("flake.nix").exists() {
+        return Finding::new(Level::Skip, "no checkout here to compare hardware against");
+    }
+    if !have("nixos-generate-config") {
+        return Finding::new(Level::Skip, "nixos-generate-config not available");
+    }
+
+    let Some(host) = fs::read_to_string("/etc/hostname").ok().map(|s| s.trim().to_string())
+    else {
+        return Finding::new(Level::Skip, "hostname unreadable");
+    };
+
+    // The directory is named for the flake attribute, which need not match
+    // networking.hostName. Fall back to a single unambiguous match.
+    let Some(dir) = host_dir(&repo, &host) else {
+        return Finding::new(Level::Skip, format!("no hosts/ entry matching {host}"));
+    };
+
+    let committed = match fs::read_to_string(dir.join("hardware.nix")) {
+        Ok(c) => c,
+        Err(_) => {
+            return Finding::new(Level::Warn, format!("{} has no hardware.nix", dir.display()))
+                .remedy("kiwami install --regen-hardware, or generate it by hand")
+        }
+    };
+
+    // No --root here: the tool rejects `--root /` outright ("no need to
+    // specify / with --root, it is the default"). At install time the target
+    // is /mnt and the flag is required.
+    let Some(fresh) = output(
+        "nixos-generate-config",
+        &["--show-hardware-config", "--no-filesystems"],
+    ) else {
+        return Finding::new(Level::Skip, "hardware detection failed (needs root)");
+    };
+
+    // Compare the settings, not the bytes: comments and blank lines differ
+    // between nixpkgs revisions and would report drift on every bump.
+    let a = significant(&committed);
+    let b = significant(&fresh);
+    if a == b {
+        return Finding::new(Level::Ok, "hardware.nix matches this machine");
+    }
+
+    let added: Vec<_> = b.iter().filter(|l| !a.contains(l)).cloned().collect();
+    let gone: Vec<_> = a.iter().filter(|l| !b.contains(l)).cloned().collect();
+    let mut detail = String::new();
+    for l in gone.iter().take(4) {
+        detail.push_str(&format!("- {l}\n"));
+    }
+    for l in added.iter().take(4) {
+        detail.push_str(&format!("+ {l}\n"));
+    }
+
+    Finding::new(Level::Warn, "hardware.nix no longer matches this machine")
+        .detail(detail.trim_end())
+        .remedy("nixos-generate-config --show-hardware-config --no-filesystems > \
+                 hosts/<name>/hardware.nix")
+}
+
+/// Which hosts/ directory describes this machine. The directory name is a
+/// flake attribute and need not equal networking.hostName - hosts/vm-aarch64
+/// is called kiwami-vm - so fall back to whichever host declares this
+/// hostname, and finally to the only one there is.
+fn host_dir(repo: &std::path::Path, hostname: &str) -> Option<std::path::PathBuf> {
+    let by_name = repo.join("hosts").join(hostname);
+    if by_name.is_dir() {
+        return Some(by_name);
+    }
+
+    let mut dirs: Vec<_> = fs::read_dir(repo.join("hosts"))
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    dirs.sort();
+
+    let declares = format!("hostName = \"{hostname}\"");
+    let mut matched = dirs
+        .iter()
+        .filter(|d| {
+            fs::read_to_string(d.join("default.nix"))
+                .map(|c| c.contains(&declares))
+                .unwrap_or(false)
+        })
+        .cloned();
+    if let (Some(one), None) = (matched.next(), matched.next()) {
+        return Some(one);
+    }
+
+    (dirs.len() == 1).then(|| dirs.remove(0))
+}
+
+/// Lines that carry meaning: no comments, no blank lines, whitespace
+/// collapsed so reindentation is not drift.
+fn significant(nix: &str) -> Vec<String> {
+    nix.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .collect()
+}
+
 // --- driver --------------------------------------------------------------
 
 pub fn run() -> Result<(), ()> {
@@ -339,7 +449,7 @@ pub fn run() -> Result<(), ()> {
             shell_unit(),
             theme_applied(),
         ]),
-        ("hygiene", vec![generations(), lock_age()]),
+        ("hygiene", vec![generations(), lock_age(), hardware_drift()]),
     ];
 
     let mut fails = 0;

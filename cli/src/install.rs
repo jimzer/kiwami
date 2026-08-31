@@ -175,6 +175,10 @@ pub struct Options {
     pub flake: String,
     pub assume_yes: bool,
     pub force: bool,
+    /// Create hosts/<name>/ if the flake does not define it yet.
+    pub new_host: bool,
+    /// Rewrite hardware.nix even if one is already committed.
+    pub regen_hardware: bool,
 }
 
 pub fn run_install(opts: Options) -> Result<(), String> {
@@ -204,8 +208,18 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     // and it is the difference between "unknown host" and "unknown host,
     // reported after your disk was erased".
     println!("==> resolving {}", opts.flake);
-    let host = resolve_host(&opts.flake, opts.host.clone(), opts.assume_yes)?;
-    println!("    host: {host}");
+    let checkout = local_checkout(&opts.flake);
+    let host = resolve_host(
+        &opts.flake,
+        opts.host.clone(),
+        opts.assume_yes,
+        opts.new_host,
+        checkout.is_some(),
+    )?;
+    println!("    host: {}", host.name);
+    if host.create {
+        println!("    will scaffold hosts/{}", host.name);
+    }
 
     let disks = disks().map_err(|e| format!("cannot enumerate disks: {e}"))?;
     if disks.is_empty() {
@@ -252,8 +266,41 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     println!("==> mounting");
     mount(&target.path)?;
 
+    // Only now is /mnt populated, which is what nixos-generate-config reads.
+    if let Some(repo) = &checkout {
+        let host_dir = repo.join("hosts").join(&host.name);
+        let hardware = host_dir.join("hardware.nix");
+
+        if host.create {
+            println!("==> scaffolding hosts/{}", host.name);
+            scaffold_host(&host_dir, &host.name)?;
+        }
+
+        // A committed hardware.nix may have been tuned by hand; replacing it
+        // silently on a reinstall is not ours to do. `kiwami doctor` reports
+        // when it has drifted from what the machine actually reports.
+        if opts.regen_hardware || !hardware.exists() {
+            println!("==> detecting hardware");
+            generate_hardware(&host_dir)?;
+        } else {
+            println!("==> keeping the committed hardware.nix (--regen-hardware to replace)");
+        }
+
+        // Only when the checkout is a git repo. A plain directory flake
+        // copies everything, so there is nothing to stage.
+        if repo.join(".git").exists() {
+            git_add(repo, &host_dir)?;
+        }
+    } else if host.create || opts.regen_hardware {
+        return Err(format!(
+            "{} is not a local checkout, so nothing can be written into it.\n\
+             Clone the flake first, then install from that path.",
+            opts.flake
+        ));
+    }
+
     println!("==> installing {} (this takes a while)", opts.flake);
-    let flake_ref = format!("{}#{}", opts.flake, host);
+    let flake_ref = format!("{}#{}", opts.flake, host.name);
     run("nixos-install", &["--flake", &flake_ref, "--no-root-passwd"])?;
 
     println!("\n==> done. Reboot into the installed system.");
@@ -393,20 +440,47 @@ fn flake_hosts(flake: &str) -> Result<Vec<String>, String> {
     serde_json::from_slice(&out.stdout).map_err(|e| format!("unexpected output from nix: {e}"))
 }
 
-fn resolve_host(flake: &str, want: Option<String>, assume_yes: bool) -> Result<String, String> {
+pub struct HostPlan {
+    pub name: String,
+    /// The flake does not define this host yet; scaffold it after mounting.
+    pub create: bool,
+}
+
+fn resolve_host(
+    flake: &str,
+    want: Option<String>,
+    assume_yes: bool,
+    new_host: bool,
+    writable: bool,
+) -> Result<HostPlan, String> {
     let hosts = flake_hosts(flake)?;
-    if hosts.is_empty() {
-        return Err(format!("{flake} defines no hosts"));
-    }
 
     if let Some(want) = want {
-        return if hosts.contains(&want) {
-            Ok(want)
-        } else {
-            Err(format!("no such host: {want}\nAvailable: {}", hosts.join(", ")))
-        };
+        if hosts.contains(&want) {
+            return Ok(HostPlan { name: want, create: false });
+        }
+        if !writable {
+            return Err(format!(
+                "no such host: {want}\nAvailable: {}\n\
+                 {flake} is fetched read-only, so a new host cannot be added to it.",
+                hosts.join(", ")
+            ));
+        }
+        // Creating a machine is not something to infer from a typo.
+        if !new_host {
+            return Err(format!(
+                "no such host: {want}\nAvailable: {}\n\
+                 Pass --new to scaffold hosts/{want} instead.",
+                hosts.join(", ")
+            ));
+        }
+        validate_host_name(&want)?;
+        return Ok(HostPlan { name: want, create: true });
     }
 
+    if hosts.is_empty() {
+        return Err(format!("{flake} defines no hosts. Pass --host <name> --new."));
+    }
     if assume_yes {
         return Err(format!(
             "--yes needs an explicit --host.\nAvailable: {}",
@@ -422,10 +496,161 @@ fn resolve_host(flake: &str, want: Option<String>, assume_yes: bool) -> Result<S
         let answer = prompt(&format!("\nInstall which host? [1-{}] ", hosts.len()))
             .map_err(|e| e.to_string())?;
         match answer.parse::<usize>() {
-            Ok(n) if n >= 1 && n <= hosts.len() => return Ok(hosts[n - 1].clone()),
+            Ok(n) if n >= 1 && n <= hosts.len() => {
+                return Ok(HostPlan { name: hosts[n - 1].clone(), create: false })
+            }
             _ => println!("Enter a number between 1 and {}.", hosts.len()),
         }
     }
+}
+
+/// The name becomes a directory and a flake attribute, so anything exotic
+/// either breaks the path or silently produces an unreachable attribute.
+fn validate_host_name(name: &str) -> Result<(), String> {
+    if name.is_empty()
+        || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(format!(
+            "bad host name: {name}\nUse letters, digits, dashes and underscores."
+        ));
+    }
+    Ok(())
+}
+
+/// Write `hosts/<name>/hardware.nix` by asking the machine about itself.
+///
+/// `--show-hardware-config` prints to stdout instead of writing into
+/// /etc/nixos. That matters: the tool otherwise also drops a starter
+/// `configuration.nix`, a second description of the machine competing with
+/// the flake, which is exactly what this design removed.
+///
+/// `--no-filesystems` omits the mounts, which come from
+/// modules/disk-layout.nix instead. Generated mounts are pinned by UUID and
+/// mkfs mints new ones on every reinstall, so the generated file would go
+/// stale and hang boot; without them it stays correct across reformats.
+fn generate_hardware(host_dir: &Path) -> Result<(), String> {
+    let out = Command::new("nixos-generate-config")
+        .args(["--root", "/mnt", "--show-hardware-config", "--no-filesystems"])
+        .output()
+        .map_err(|e| format!("nixos-generate-config: {e}"))?;
+
+    if !out.status.success() {
+        return Err(format!(
+            "cannot detect hardware:\n{}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+
+    // The tool's own header says to make changes in
+    // /etc/nixos/configuration.nix - the one file this design deliberately
+    // does not have. Leaving it in place would point every future reader at
+    // the wrong place, so replace it with where things actually live.
+    let body = String::from_utf8_lossy(&out.stdout);
+    let body = body
+        .lines()
+        .skip_while(|l| l.trim_start().starts_with('#'))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let header = "\
+# Hardware facts for this machine, detected by `kiwami install`.
+#
+# Generated with --show-hardware-config --no-filesystems, so it carries no
+# UUIDs: the mounts live in modules/disk-layout.nix and survive a reformat.
+#
+# Do not edit by hand. `kiwami doctor` compares this against what the machine
+# currently reports; regenerate with `kiwami install --regen-hardware`, or:
+#   nixos-generate-config --show-hardware-config --no-filesystems
+#
+# Choices - hostname, users, monitors - belong in default.nix beside this.
+";
+
+    fs::create_dir_all(host_dir).map_err(|e| e.to_string())?;
+    fs::write(host_dir.join("hardware.nix"), format!("{header}{body}\n"))
+        .map_err(|e| e.to_string())
+}
+
+/// The choices half of a machine: the things no probe can answer.
+fn scaffold_host(host_dir: &Path, name: &str) -> Result<(), String> {
+    let body = format!(
+        r#"# {name}
+#
+# Scaffolded by `kiwami install`. Everything here is a choice, not a fact -
+# edit it freely, then `nixos-rebuild switch --flake .#{name}`.
+#
+# hardware.nix beside this file is the facts half, detected at install time.
+# Regenerate it with `kiwami doctor` if this machine's hardware changes.
+{{ ... }}:
+
+{{
+  imports = [
+    ./hardware.nix
+    # The two partitions `kiwami install` created. Drop this import if you
+    # ever repartition by hand.
+    ../../modules/disk-layout.nix
+  ];
+
+  networking.hostName = "{name}";
+
+  boot.loader.systemd-boot.enable = true;
+  # Without this systemd-boot never registers an NVRAM entry and the firmware
+  # boots something else, or nothing.
+  boot.loader.efi.canTouchEfiVariables = true;
+
+  # Replace with your own account. `kiwami install --no-root-passwd` leaves
+  # root locked, so set a password here or you cannot log in.
+  users.users.{user} = {{
+    isNormalUser = true;
+    extraGroups = [ "wheel" "networkmanager" "video" ];
+    initialPassword = "kiwami";
+  }};
+
+  home-manager.users.{user} = {{
+    imports = [
+      ../../modules/home/configs.nix
+      ../../modules/home/shell.nix
+    ];
+    home.stateVersion = "26.05";
+  }};
+
+  system.stateVersion = "26.05";
+}}
+"#,
+        name = name,
+        user = "kiwami",
+    );
+    fs::create_dir_all(host_dir).map_err(|e| e.to_string())?;
+    fs::write(host_dir.join("default.nix"), body).map_err(|e| e.to_string())
+}
+
+/// Nix builds from what git knows about, not from what is in the directory.
+/// A brand new file is invisible to the flake even though `ls` shows it, and
+/// the resulting "path does not exist in Git repository" names a file that is
+/// plainly there. Staging is enough - no commit required.
+fn git_add(repo: &Path, what: &Path) -> Result<(), String> {
+    let status = Command::new("git")
+        .args(["-C", &repo.to_string_lossy(), "add", "--", &what.to_string_lossy()])
+        .status()
+        .map_err(|e| format!("git: {e}"))?;
+    if !status.success() {
+        return Err(format!(
+            "git add failed for {}. The flake cannot see untracked files, so \n             the install would fail on a file that is sitting right there.",
+            what.display()
+        ));
+    }
+    Ok(())
+}
+
+/// A local path we can write into, or nothing. `github:...` and friends are
+/// fetched read-only into the store, so a generated file cannot be added to
+/// them - that is why installing a new machine needs a clone.
+fn local_checkout(flake: &str) -> Option<PathBuf> {
+    let path = flake.strip_prefix("path:").unwrap_or(flake);
+    if path.contains(':') {
+        return None;
+    }
+    let p = PathBuf::from(path);
+    p.join("flake.nix").exists().then_some(p)
 }
 
 /// Print the detected disks and exit. Used by tests and by anyone wondering

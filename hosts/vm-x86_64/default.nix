@@ -1,13 +1,22 @@
 # x86_64 QEMU guest. Same desktop as the aarch64 dev VM, different
 # architecture, so CI catches anything that only breaks on x86_64.
+#
+# Nothing runs this interactively; it exists to be built and booted in CI.
 { pkgs, ... }:
 
 {
   imports = [
-    ./hardware-configuration.nix
-    ../../modules/common.nix
-    ../../modules/desktop.nix
+    ./hardware.nix
+    ../../modules/disk-layout.nix
   ];
+
+  home-manager.users.nixos = {
+    imports = [
+      ../../modules/home/configs.nix
+      ../../modules/home/shell.nix
+    ];
+    home.stateVersion = "26.05";
+  };
 
   networking.hostName = "kiwami-vm-x86";
 
@@ -21,14 +30,6 @@
 
   users.users.nixos.initialPassword = "kiwami";
   users.users.root.initialPassword = "kiwami";
-
-  home-manager.users.nixos = {
-    imports = [
-      ../../modules/home/dotfiles.nix
-      ../../modules/home/shell.nix
-    ];
-    home.stateVersion = "26.05";
-  };
 
   system.stateVersion = "26.05";
 }

@@ -44,13 +44,18 @@ step "installing via kiwami install"
 # partitioned and formatted itself, which meant `just vm install` proved
 # nothing about `kiwami install` - two installers, guaranteed to drift.
 #
+# --regen-hardware makes this the end-to-end test of the generation path:
+# the guest detects its own hardware, the result is written into the pushed
+# tree, and the machine then boots from it. Anything the generated config
+# misses shows up here as a VM that never comes back.
+#
 # kiwami is built from the pushed flake rather than downloaded: that also
 # checks the package builds in the installer environment, which is what a
 # real `nixos-install --flake github:...` does. A custom ISO will ship the
 # binary and this step becomes a plain `kiwami install`.
 $CONSOLE run "nohup env NIX_CONFIG='experimental-features = nix-command flakes' \
   nix run /tmp/kiwami#kiwami -- install \
-    --disk /dev/vda --yes --force \
+    --disk /dev/vda --yes --force --regen-hardware \
     --flake /tmp/kiwami --host ${HOST} > /tmp/install.log 2>&1 &" >/dev/null
 
 for _ in $(seq 1 90); do

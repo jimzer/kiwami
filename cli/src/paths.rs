@@ -4,9 +4,21 @@ use std::path::PathBuf;
 /// place there, which is what makes a colour change a reload rather than a
 /// rebuild.
 pub fn repo() -> PathBuf {
-    std::env::var_os("KIWAMI_REPO")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home().join("kiwami"))
+    if let Some(explicit) = std::env::var_os("KIWAMI_REPO") {
+        return PathBuf::from(explicit);
+    }
+    let here = home().join("kiwami");
+    if here.exists() {
+        return here;
+    }
+    // Under sudo, HOME is root's, so the checkout in the invoking user's home
+    // is invisible - and doctor's hardware and flake.lock checks both need
+    // root. Silently reporting "no checkout here" while one sits in
+    // /home/you/kiwami is worse than not having the check.
+    std::env::var_os("SUDO_USER")
+        .map(|u| PathBuf::from("/home").join(u).join("kiwami"))
+        .filter(|p| p.exists())
+        .unwrap_or(here)
 }
 
 pub fn home() -> PathBuf {

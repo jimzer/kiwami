@@ -24,23 +24,30 @@
       forAllSystems = f:
         nixpkgs.lib.genAttrs systems (s: f nixpkgs.legacyPackages.${s});
 
-      mkHost = system: modules:
+      # No `system` argument: every host's hardware.nix sets
+      # nixpkgs.hostPlatform, which is where nixosSystem takes it from. Saying
+      # it twice means a machine whose architecture can disagree with its own
+      # hardware description.
+      mkHost = modules:
         nixpkgs.lib.nixosSystem {
-          inherit system;
           # Makes every flake input reachable inside modules as `inputs.*`.
           specialArgs = { inherit inputs; };
           modules = modules ++ [
+            # Our own hosts are built from the same module we export, so
+            # anything that breaks for a consumer breaks for us first.
+            self.nixosModules.default
             # Set here rather than in a shared module: nixosTest supplies its
             # own pkgs instance and rejects a config being set from inside.
             { nixpkgs.config.allowUnfree = true; }
-            home-manager.nixosModules.home-manager
-            {
-              home-manager.useGlobalPkgs = true;
-              home-manager.useUserPackages = true;
-              home-manager.extraSpecialArgs = { inherit inputs; };
-            }
           ];
         };
+
+      # Every directory under hosts/ is a machine. Adding one is creating a
+      # folder and `git add`-ing it - there is no second list to keep in sync,
+      # which matters because `kiwami install` scaffolds these directories and
+      # nothing should have to edit this file to register them.
+      hostNames = builtins.attrNames
+        (nixpkgs.lib.filterAttrs (_: t: t == "directory") (builtins.readDir ./hosts));
     in
     {
       # The kiwami CLI. Built once here and consumed by the hosts below, so the
@@ -103,7 +110,7 @@
               home-manager.extraSpecialArgs = { inherit inputs; };
               home-manager.users.nixos = {
                 imports = [
-                  ./modules/home/dotfiles.nix
+                  ./modules/home/configs.nix
                   ./modules/home/shell.nix
                 ];
                 home.stateVersion = "26.05";
@@ -208,13 +215,7 @@
         home-manager.extraSpecialArgs = { inherit inputs; };
       };
 
-      nixosConfigurations = {
-        # Dev VM on the Mac: aarch64 so it runs natively under HVF.
-        vm-aarch64 = mkHost "aarch64-linux" [ ./hosts/vm-aarch64 ];
-
-        # Same desktop on x86_64. Nothing runs this interactively; it exists so
-        # CI builds and boots the architecture the real machine will use.
-        vm-x86_64 = mkHost "x86_64-linux" [ ./hosts/vm-x86_64 ];
-      };
+      nixosConfigurations =
+        nixpkgs.lib.genAttrs hostNames (name: mkHost [ (./hosts + "/${name}") ]);
     };
 }

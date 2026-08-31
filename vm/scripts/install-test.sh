@@ -59,6 +59,12 @@ check "names the hosts it does have"   "vm-aarch64" \
   "sudo kiwami install --force --flake $FLAKE --host nope --disk /dev/vdc --yes"
 check "--yes will not guess a host"    "needs an explicit --host" \
   "sudo kiwami install --force --flake $FLAKE --disk /dev/vdc --yes"
+check "will not invent a host silently" "Pass --new to scaffold" \
+  "sudo kiwami install --force --flake $FLAKE --host laptop --disk /dev/vdc --yes"
+check "rejects a bad host name"        "bad host name" \
+  "sudo kiwami install --force --flake $FLAKE --host 'a/b' --new --disk /dev/vdc --yes"
+check "cannot add a host to a fetched flake" "fetched read-only" \
+  "sudo kiwami install --force --flake github:jimzer/kiwami --host laptop --new --disk /dev/vdc --yes"
 
 # --- prompts -------------------------------------------------------------
 check "warns before erasing a non-empty disk" "Everything on it will be destroyed" \

@@ -44,7 +44,7 @@ A machine is a small flake of its own — no fork:
       system = "x86_64-linux";
       modules = [
         kiwami.nixosModules.default
-        ./hardware-configuration.nix
+        ./hardware.nix
         { kiwami.bar.position = "bottom"; }
       ];
     };
@@ -75,6 +75,7 @@ Widgets resolve by filename: add `shell/widgets/Weather.qml`, name it in
 kiwami install             # install to a disk, from the live ISO
 kiwami disks               # what the installer can see
 kiwami net                 # get online; offers a wifi menu if needed
+kiwami install --new --host laptop   # scaffold a machine and install it
 kiwami theme list / set    # switch theme, no rebuild
 kiwami doctor              # drift + health; non-zero exit on problems
 kiwami commands --json     # actions the launcher offers
