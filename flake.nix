@@ -167,6 +167,28 @@
           };
         });
 
+      # The distro as an importable module, so a machine can be built from
+      # Kiwami without forking it. Deliberately excludes anything
+      # host-specific - hardware, hostname, users - which the consumer
+      # supplies alongside it.
+      nixosModules.default = { lib, ... }: {
+        imports = [
+          home-manager.nixosModules.home-manager
+          ./modules/common.nix
+          ./modules/desktop.nix
+        ];
+
+        # Modules reach the flake's own inputs (the kiwami package, quickshell)
+        # through this rather than the consumer having to thread it.
+        _module.args.inputs = inputs;
+
+        nixpkgs.config.allowUnfree = lib.mkDefault true;
+
+        home-manager.useGlobalPkgs = lib.mkDefault true;
+        home-manager.useUserPackages = lib.mkDefault true;
+        home-manager.extraSpecialArgs = { inherit inputs; };
+      };
+
       nixosConfigurations = {
         # Dev VM on the Mac: aarch64 so it runs natively under HVF.
         vm-aarch64 = mkHost "aarch64-linux" [ ./hosts/vm-aarch64 ];
