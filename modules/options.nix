@@ -97,9 +97,10 @@ in
         default = { };
         example = { font-size = 14; cursor-style = "bar"; };
         description = ''
-          Ghostty settings, rendered to its config format. Every key our
-          defaults set uses mkDefault, so overriding one from a consumer flake
-          replaces just that key and leaves the rest.
+          Per-machine Ghostty overrides, rendered to a file included after
+          Kiwami's defaults and the theme. Empty by default: the defaults are
+          a real Ghostty file (config/ghostty/defaults), not generated from
+          here, so this only carries what a consumer actually changes.
         '';
       };
 

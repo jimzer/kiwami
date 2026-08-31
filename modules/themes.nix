@@ -4,19 +4,6 @@
 # colour of one theme, from their own flake.
 { lib, ... }:
 {
-  # Defaults, each individually overridable: attrsets merge per key and
-  # mkDefault applies per value, so a consumer setting one key keeps the rest.
-  kiwami.terminal.settings = lib.mapAttrs (_: lib.mkDefault) {
-    font-family = "JetBrainsMono Nerd Font";
-    font-size = 11;
-    window-padding-x = 10;
-    window-padding-y = 8;
-    window-decoration = false;
-    cursor-style = "block";
-    confirm-close-surface = false;
-    scrollback-limit = 100000;
-  };
-
   kiwami.theme.themes = lib.mkDefault {
     kiwami = {
       accent = "#7ad07a";  accentDim = "#4f8f56";

@@ -48,8 +48,13 @@ in
     "kiwami/bar.json".text = barManifest;
     "kiwami/shell".source = ../shell;
 
-    "kiwami/config/ghostty/defaults".text = ''
-      # Generated from kiwami.terminal.settings. Do not edit; set the options.
+    # Ours, a real Ghostty file rather than generated - same treatment as the
+    # Hyprland Lua, and for the same reason: it reads better in its own syntax.
+    "kiwami/config/ghostty/defaults".source = ../config/ghostty/defaults;
+
+    # Only what a consumer set, plus free-form lines. Usually empty.
+    "kiwami/config/ghostty/nix".text = ''
+      # Generated from kiwami.terminal.settings and .extraConfig.
       ${lib.concatStringsSep "\n" (lib.mapAttrsToList renderGhostty cfg.terminal.settings)}
 
       ${cfg.terminal.extraConfig}
@@ -92,6 +97,7 @@ in
       # ~/.config/ghostty/overrides - it is loaded last and wins.
       config-file = ?/etc/kiwami/config/ghostty/defaults
       config-file = ?~/.local/state/kiwami/current/theme/ghostty.conf
+      config-file = ?/etc/kiwami/config/ghostty/nix
       config-file = ?~/.config/ghostty/overrides
     '';
   };
