@@ -1,225 +1,140 @@
 # Kiwami — task tracker
 
-A personal NixOS distribution: Hyprland + a Quickshell desktop built from
-scratch, developed largely by agents against a VM harness.
+A personal NixOS desktop: Hyprland plus a Quickshell shell written from
+scratch, developed against a VM an agent can drive.
 
-Status: **Tier 2 (the agent VM loop) is done first, on purpose** — it multiplies
-every task after it. Tier 0 is next.
-
-Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
+Legend: `[ ]` todo · `[~]` partial · `[x]` done · `(?)` open question
 
 ---
 
-## Decisions taken
+## Decisions
 
-- **Base: NixOS**, not Arch. Considered seriously and reversed twice. Deciding
-  factors: `flake.lock` pins Quickshell (an alpha dependency the whole desktop
-  sits on), generations give per-config rollback, packages are declared by
-  construction, and `nixosTest` exists. Costs accepted: idiom/ramp tax and
-  occasional derivation-writing for niche vendor binaries. Rebuild cost was
-  *measured*, not assumed: 2.5s no-op, 7.7s after a config change, on the
-  aarch64 VM. The early "utter pain" framing was wrong.
-- **Ship config in the app's own format; add options only for what must be set
-  per machine.** `config/hypr/hyprland.lua` and `config/ghostty/defaults` are
-  real files placed read-only into `/etc` by Nix. Generating them from Nix
-  attrsets cost three mechanisms to express eight lines and bought nothing a
-  user could see.
-- **One source of truth: the flake.** Configs are placed by Home Manager as
-  read-only store symlinks; you change one by editing it in the flake and
-  rebuilding. There is no `~/.config` override layer, because the user who
-  needed it — someone who will not write Nix — is not the audience.
-  Measured cost of that choice: 8.2s to change a config versus 0.76s to
-  restart the shell, so the checkout is still preferred for QML during
-  development.
-- **The option surface is for multiple machines, not multiple users.**
+- **Base: NixOS.** Reversed twice before settling. Deciding factors:
+  `flake.lock` pins Quickshell (an alpha dependency the whole desktop sits on),
+  generations give rollback, packages are declared by construction, and
+  `nixosTest` exists. Rebuild cost was *measured*, not assumed — 2.5s no-op,
+  7.7s after a config change. The early "utter pain" framing was wrong.
+
+- **The flake is the machine.** Configs are read-only store symlinks placed by
+  Home Manager. Changing one means editing it here and rebuilding. A
+  `~/.config` override layer was built and removed: it existed for someone who
+  will not write Nix, who is not the audience, and it caused stale overrides,
+  detached symlinks and three separate bugs.
+
+- **Options are for multiple machines, not multiple users.**
   `kiwami.bar.position` is how a laptop differs from a desktop without forking
-  a QML file, and what someone importing `nixosModules.default` overrides.
+  QML, and what a consumer flake overrides.
+
 - **Themes stay runtime.** Authored as typed Nix, generated to JSON, switched
-  by `kiwami theme set` with no rebuild — the one runtime hook that earns its
-  place, because designing a palette wants instant feedback.
-- **CLI is thin.** On NixOS `nixos-rebuild` does the real work, so `kiwami` is a
-  wrapper, not a package manager.
-- **Dev VM is aarch64**, native under HVF. Architecture is irrelevant for bar
-  layout and launcher logic; GPU/kernel work happens on the real machine.
-- **Never write a custom lock screen.** Keep `hyprlock` permanently.
-- **The session runs under UWSM**, so `graphical-session.target` activates and
-  user units work. See [docs/session-services.md](docs/session-services.md).
-- **The shell runs as a systemd user unit**, not exec'd from Hyprland. We get
-  `Restart=always`, `journalctl --user -u`, and a clean
-  `systemctl --user restart` to pair with the disabled file watcher. Omarchy
-  execs theirs instead, but only after rebuilding logging and restart-on-crash
-  by hand in a wrapper script.
-- **Hyprland config in Lua** (v0.55+), not `hyprland.conf`. Decided before any
-  binds were written, so there is nothing to port. Real logic in binds and rules
-  stays in a language with functions and variables, and it matches the QML/JS
-  side of the shell.
+  by `kiwami theme set` with no rebuild. Designing a palette needs instant
+  feedback; it costs one file and a watcher.
 
-## Decisions still open
+- **Ship config in the app's own format.** `hyprland.lua` and `ghostty/config`
+  are real files. Generating Ghostty's from a Nix attrset cost three mechanisms
+  to express eight lines and bought nothing visible.
 
-- (?) **Quickshell: from scratch vs fork.** Building from scratch is the stated
-  goal; forking a public config to restyle is far faster. Possible split: fork to
-  learn, rewrite once the API is familiar.
-- (?) **Impermanence: rehearse in the VM before the desktop is daily-driven.**
-  Not "someday". The version that solves the actual goal (no accumulated junk in
-  `$HOME`) is the one that wipes home too, so the persist list has to be right.
-  The VM is disposable and reinstalls in ~3 min, so a forgotten path costs
-  nothing there and everything on real hardware. Get the list right in the VM,
-  then carry a proven list over. Pair it with the btrfs pristine-root diff so
-  "what did I forget" is a list you read, not a guess.
-- (?) **Dictation STT** — local whisper.cpp vs an API. Affects latency and
-  whether the GPU matters.
+- **The session runs under UWSM**, so `graphical-session.target` activates.
+  The shell is a user unit, not exec'd from Hyprland.
+
+- **Hyprland config in Lua** (0.55+). Binds use loops and function calls, which
+  Nix can only express as escaped strings.
+
+- **Never write a custom lock screen.** `hyprlock` permanently.
+
+- **Dev VM is aarch64** (native under HVF); CI builds and boots x86_64.
+
+## Open
+
+- (?) **Quickshell: keep writing from scratch, or read others' configs for the
+  hard parts?** Current approach is from scratch, reading upstream's type stubs
+  when stuck, which has worked.
+- (?) **Impermanence timing.** Rehearse in the VM before the desktop is
+  daily-driven — a forgotten path costs nothing there and everything on real
+  hardware.
+- (?) **Dictation STT** — local whisper vs an API.
 
 ---
 
-## Tier 2 — Agent VM loop  `[x] DONE`
+## Done
 
-- [x] QEMU aarch64 NixOS guest on macOS, HVF-accelerated
-- [x] QMP channel — `screendump` → PNG, `sendkey`
-- [x] Serial channel — run commands, capture stdout + exit code, auto-login
-- [x] SSH channel — key auth, port-forwarded
-- [x] Unattended install (`just vm install`, ~3 min, verified end to end)
-- [x] Snapshot / restore (`just vm reset`)
-- [x] `just` module interface as a stable API boundary
-- [x] 13 gotchas documented in `vm/README.md`
-- [ ] `nixosTest` harness alongside the manual one  *(blocked: needs a Linux host)*
-- [x] CI — evaluate, build x86_64 (CLI + closure), and a nixosTest that boots
-      the desktop. Screenshots uploaded as artifacts.
+**Foundation** — flake with pinned inputs, `hosts/{vm-aarch64,vm-x86_64}`,
+Home Manager, UWSM session, `nixosModules.default` exported and verified from a
+consumer flake pulling from GitHub.
 
-## Tier 0 — Foundation  `[~] IN PROGRESS`
+**Desktop** — Hyprland 0.55, Ghostty, bar (workspaces, window title, clock,
+tray, battery), launcher merging apps with CLI actions, power menu, volume OSD,
+notifications, theme pipeline with live retint.
 
-- [x] Convert `vm/config/configuration.nix` into a flake
-- [x] `hosts/vm-aarch64/` + `modules/common.nix`; `hosts/desktop/` still todo
-- [x] Nix on the Mac (Determinate 3.22.2 / Nix 2.35.2) — lock + eval locally
-- [x] `flake.lock` pins nixpkgs, home-manager, quickshell
-- [x] VM rebuilt from the flake and **rebooted into it** (generation 3)
-- [x] `install.sh` installs via `nixos-install --flake`; `vm/config/` deleted,
-      so the flake is the single definition of the machine
-- [x] Public repo at github.com/jimzer/kiwami — `nixos-install --flake
-      github:jimzer/kiwami#<host>` verified to produce the same derivation as
-      the local tree
-- [x] Hyprland 0.55.4 autostarting via greetd in the VM, config in Lua
-- [x] `mkOutOfStoreSymlink` wiring — `~/.config/hypr` resolves to the working
-      tree, so `just vm reload` is edit -> `hyprctl reload`, no rebuild
-- [x] Home Manager wired as the package/dotfile layer only
-- [ ] `hosts/desktop/`  *(blocked: needs the machine)*
-- [x] `SUPER+SHIFT+R` → restart the shell, bound in the compositor so it works
-      when the shell is gone entirely
-- [ ] Track the impermanence persist-list from the start
-- [ ] *(blocked)* Install NixOS on the real desktop; generate + commit its
-      `hardware-configuration.nix`
+**Options** — `kiwami.*` typed; colours are `types.strMatching "#[0-9a-fA-F]{6}"`,
+which rejects at eval the malformed value that once shipped. Bar composes from
+a generated manifest; widgets resolve by filename.
 
-## The option surface  `[x] DONE`
+**CLI** — `install` (disk detection, selection, refusals, confirmation),
+`theme`, `doctor`, `commands --json`.
 
-- [x] `kiwami.*` is the API: `bar.{enable,position,height,left,center,right}`,
-      `theme.{name,themes}`, `terminal.{settings,extraConfig}`,
-      `hyprland.extraConfig`
-- [x] Colours are `types.strMatching "#[0-9a-fA-F]{6}"` — rejects at eval the
-      exact malformed value that shipped earlier
-- [x] `nixosModules.default` exported, so a machine is a small flake importing
-      Kiwami rather than a fork. Verified from a consumer flake pulling from
-      GitHub: their `timeZone` and two Ghostty keys won, our defaults filled
-      the rest, `systemPackages` merged.
-- [x] Bar composes from a generated manifest; `kiwami.bar.position = "bottom"`
-      moves it with no QML change
+**Harness** — 3-minute unattended install, QMP/serial/SSH channels,
+snapshot/reset, installer matrix (13 checks), CI on x86_64 (evaluate, build,
+boot test with screenshots).
 
-## Tier 1 — The product
+---
 
-- [x] **Bar** — workspaces (live from Hyprland IPC, clickable), focused window
-      title, running clock. Still to do: top/bottom as one setting
-- [x] **Launcher** — `DesktopEntries`, prefix-first filtering, keyboard nav,
-      `SUPER+SPACE` via a Hyprland global shortcut
-- [x] **Theme pipeline** — `config/themes/<name>/colors.json` is the single
-      source. Quickshell reads and watches it directly (retints with no
-      restart); `kiwami theme set` generates `ghostty.conf` and `colors.lua`
-      for the two that cannot. Everything points at the stable path
-      `~/.local/state/kiwami/current/theme`.
-- [~] **`kiwami` CLI** — Rust, built by the flake as `packages.<system>.kiwami`.
-      Has `theme list/current/set` and `commands --json`. Still to do:
-      `update`, `rollback`, `doctor`
-- [x] **`kiwami doctor`** — drift (imperative nix installs, stray binaries,
-      language-manager globals), health (failed units, flapping shell,
-      graphical-session, theme applied, entry points still managed) and
-      hygiene (generations, flake.lock age). Exits non-zero on problems.
-- [ ] `kiwami doctor` impermanence readiness — report paths that would be lost
-      on reboot, once a persist list exists
-- [x] **Power menu** — lock/suspend/logout/reboot/shutdown, `SUPER+SHIFT+P`,
-      keyboard and mouse nav; also offered in the launcher via the CLI
-- [x] **Tray** — StatusNotifierItem, left-click activates, right-click menu.
-      Empty in the VM because nothing registers an icon there
-- [x] **Audio OSD** — reacts to PipeWire state rather than being told to
-      appear, so it also shows when something else changes the volume. Verified
-      against a real sink (QEMU now gives the VM an HDA card)
-- [~] **Brightness OSD / battery**  *(blocked: needs real hardware)* — written and wired, but *unverified*: the
-      VM has no backlight and no battery, so both paths only prove they hide
-      cleanly. Needs real hardware.
+## Next
 
-## Shell customisation  `[x] DONE`
+### Clipboard and emoji
+- [ ] Extract `Picker.qml` from `Launcher.qml` — the refactor is the work; both
+      features fall out of it
+- [ ] `cliphist` as a user unit; `SUPER+V`
+- [ ] Emoji dataset in the store; `SUPER+.`
+- [ ] Copy on select. Paste needs synthetic input and stays a flag, never a
+      promise
 
-- [x] Widgets resolve by filename, so adding `widgets/Weather.qml` and naming
-      it in `kiwami.bar.right` is all it takes
-- [x] Error isolation at both levels — a broken widget costs that slot, a
-      broken top-level component costs that piece, neither kills the shell
-- [~] The `~/.config` override layer was built and then removed. It existed
-      for a user who does not write Nix, and that user does not exist here.
-      What it cost: stale overrides, detached symlinks, three separate bugs.
+### Custom ISO
+- [ ] `nixosConfigurations.installer` from `installation-cd-minimal.nix`, with
+      `kiwami` baked in and flakes enabled
+- [ ] Carry the flake rather than fetch it — an installer that needs DHCP to
+      work is a bad installer
+- [ ] Autologin into the installer
+- [ ] Build in CI (x86_64 cannot be built on the Mac); boot it in the VM and
+      run the existing matrix against it
 
-## Tier 3 — Differentiators
+### Impermanence
+- [ ] **Phase 0, start now:** generate `/etc/kiwami/persist.json` from the
+      config and have `doctor` report paths that exist and are not persisted.
+      Pure reporting, builds the list empirically
+- [ ] Phase 1: rehearse in the VM with a generous list, reinstall, see what
+      breaks
+- [ ] Phase 2: tighten. Phase 3: real machine
+- [ ] Non-obvious entries: `/etc/ssh/ssh_host_*` (or SSH warns every boot),
+      `/var/lib/systemd` (machine-id, journal), `/var/lib/nixos` (uid/gid
+      allocation)
+- [ ] Keep a btrfs snapshot of a pristine root so the diff answers "what did I
+      forget" instead of guessing
 
-- [ ] **Push-to-talk dictation** — bind → `pw-record` → whisper → `wl-copy` +
-      QML overlay pill. Ship clipboard-only; `wtype` injection is a best-effort
-      flag, never a promise.
-- [ ] Wrapped vendor binaries as flake outputs (Claude etc.)
-- [ ] Clipboard manager, emoji picker
-- [ ] Calendar popup on clock click (local month only, no sync)
-- [x] **Notifications** — Quickshell owns org.freedesktop.Notifications;
-      stacked popups, critical ones persist until dismissed, the rest expire
+### Real hardware  *(blocked: needs the machine)*
+- [ ] `hosts/desktop/` with a generated `hardware-configuration.nix`
+- [ ] Brightness OSD and battery widget are written and wired but **never
+      rendered** — the VM has no backlight and no battery, so both paths only
+      prove they hide cleanly
+- [ ] One installer run on real firmware. Vendor UEFI quirks are what QEMU
+      cannot model, and we already saw a preview when edk2 put the boot entry
+      last in `BootOrder`
 
-## Installer
+### Smaller
+- [ ] Calendar popup on the clock (local month, no sync)
+- [ ] Bar top/bottom is an option but only `top` has been looked at carefully
+- [ ] `kiwami update` / `rollback` — thin wrappers, worth it once there is a
+      machine to live on
+- [ ] Push-to-talk dictation: bind → `pw-record` → whisper → `wl-copy` + an
+      overlay pill
 
-- [x] `kiwami install` — disk detection, numbered selection, size and in-use
-      refusals, explicit confirmation before anything is written
-- [x] Test matrix (`just vm install-test`) — 13 checks over scratch disks
-      including an NVMe, a partitioned disk and one too small
-- [x] `just vm install` drives `kiwami install`, so the installer under test
-      is the one that ships. There is no second installer to drift.
-- [ ] *(blocked: needs real hardware)* One validation run on real firmware (vendor UEFI quirks are the part a
-      VM cannot model)
-
-## Tier 4 — Packaging
-
-- [ ] `nix build .#iso` installer image
-- [ ] Impermanence (root + `$HOME` on tmpfs, declared persistence)
-- [ ] Dock — pick bar *or* dock as primary; two layout systems is two
-      reserved-space bugs
-- [ ] Plugin loading from `~/.config/kiwami/plugins/`
-
-## Cut — do not build
+## Cut
 
 Plugin marketplace · custom lock screen · calendar sync · per-machine theme
-variants · anything requiring other people to adopt it
-
----
+variants · anything that assumes a user who will not write Nix
 
 ## Known debt
 
-- Three separate things only worked inside a dev checkout before CI existed:
-  themes, the shell QML tree, and the Hyprland/Ghostty configs. All now install
-  under `/etc/kiwami/` with the working tree preferred at runtime. Anything new
-  the desktop needs at runtime should follow the same shape from the start.
-
-
-- `hardware-configuration.nix` for the VM mounts **by label**, not UUID, because
-  `just vm install` reformats and mkfs generates new UUIDs each time. Real
-  hardware must use the generated UUIDs.
-- VM credentials are hardcoded (`nixos`/`kiwami`) — fine for a throwaway guest,
-  must not leak into the desktop host
-- No CI; every check is manual
+- CI's boot test asserts the desktop comes up; it does not check that widgets
+  render correctly
 - `vm/scripts/install.sh` is verified only against the aarch64 QEMU guest
 - The VM has no GPU (llvmpipe): validates layout and logic, not animation
-
-## Ordering rules worth keeping
-
-1. Theme pipeline before widget #3.
-2. `kiwami doctor` before tools start accumulating.
-3. No custom ISO until the shell has been daily-driven for a month.
-4. Nothing in Tier 3+ until Tier 1 is boring.

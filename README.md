@@ -1,107 +1,128 @@
 # Kiwami
 
-A personal NixOS desktop: Hyprland, a Quickshell shell built from scratch, and a
-small CLI to drive it — developed against an agent-drivable VM harness.
+A personal NixOS desktop: Hyprland, a Quickshell shell written from scratch,
+and a small CLI — developed against a VM the agent can drive.
 
-Status: early. The VM harness and the flake foundation work; the desktop does
-not exist yet. See [TASKS.md](TASKS.md).
+Status: early. The desktop works in a VM; it has never run on real hardware.
+See [TASKS.md](TASKS.md).
 
-## Installing on real hardware
+## The model
 
-Boot the official NixOS ISO, partition, then:
+**The flake is the machine.** Configs are placed by Home Manager as read-only
+symlinks into the Nix store. You change one by editing it here and rebuilding
+— the same motion as changing a package or a service. There is no separate
+user-override layer.
+
+Two things stay at runtime, because a rebuild is the wrong granularity for
+them:
+
+- **Themes.** Authored as typed Nix, generated to JSON, switched with
+  `kiwami theme set` and no rebuild. The shell watches the file and retints
+  live, which is what designing a palette needs.
+- **The shell tree during development.** The launcher prefers `~/kiwami/shell`
+  when it exists, so iterating on QML is a 0.8s restart rather than an 8s
+  rebuild.
+
+## Using it
+
+Install NixOS, then:
 
 ```bash
 nixos-install --flake github:jimzer/kiwami#desktop
 ```
 
-The dev VM deliberately does *not* install this way: `just vm install` ships the
-working tree over the serial console, so it tests uncommitted changes rather than
-the last pushed commit.
+## Building on it
+
+A machine is a small flake of its own — no fork:
+
+```nix
+{
+  inputs.kiwami.url = "github:jimzer/kiwami";
+
+  outputs = { nixpkgs, kiwami, ... }: {
+    nixosConfigurations.my-laptop = nixpkgs.lib.nixosSystem {
+      system = "x86_64-linux";
+      modules = [
+        kiwami.nixosModules.default
+        ./hardware-configuration.nix
+        { kiwami.bar.position = "bottom"; }
+      ];
+    };
+  };
+}
+```
+
+Kiwami's defaults use `mkDefault`, so your values win and ours fill the rest.
+`nix flake update` pulls improvements without touching what you overrode.
+
+## Options
+
+`kiwami.*` is the API. It exists so machines can differ without forking files.
+
+| | |
+|---|---|
+| `bar.{enable,position,height,left,center,right}` | which widgets, where |
+| `theme.{name,themes}` | palettes, type-checked as `#rrggbb` |
+| `terminal.{settings,extraConfig}` | per-machine Ghostty overrides |
+| `hyprland.extraConfig` | Lua appended after ours |
+
+Widgets resolve by filename: add `shell/widgets/Weather.qml`, name it in
+`kiwami.bar.right`, done.
 
 ## The CLI
 
-`cli/` is a Rust binary built by this flake as `packages.<system>.kiwami`, so
-the same build serves `nix run github:jimzer/kiwami`, the system closure, and
-any future image.
-
 ```bash
-kiwami install             # install to a disk (from the live ISO)
+kiwami install             # install to a disk, from the live ISO
 kiwami disks               # what the installer can see
+kiwami theme list / set    # switch theme, no rebuild
 kiwami doctor              # drift + health; non-zero exit on problems
-kiwami theme list          # available themes, active one marked
-kiwami theme set midnight  # switch, regenerate, retint everything
-kiwami commands --json     # actions the launcher should offer
+kiwami commands --json     # actions the launcher offers
 ```
 
-The launcher merges `kiwami commands --json` with `.desktop` applications, so
-typing "theme" offers the theme switches without opening a terminal. The CLI
-stays the single source of truth for what it can do.
-
-## Layout
-
-```
-flake.nix              inputs (nixpkgs, home-manager, quickshell) + hosts
-flake.lock             exact commits — the whole point
-hosts/<host>/          per-machine: choices + hardware facts
-modules/               shared across hosts
-vm/                    aarch64 dev VM on macOS, drivable by an agent
-```
-
-## Quick start
-
-```bash
-just                 # list commands
-just vm              # list the VM subsystem
-just vm install      # wipe + unattended install into the dev VM (~3 min)
-just vm start        # boot it headless
-just vm gui          # boot it in a window
-just vm ssh 'uname -a'
-just vm screenshot bar
-just vm rebuild      # push the flake and nixos-rebuild switch
-just vm reload       # push, reload Hyprland, restart the shell — no rebuild
-just vm shell-log    # journal for the shell unit
-just vm start-test-disks   # boot with the installer's scratch disks
-just vm install-test       # installer test matrix
-just vm hyprctl clients
-```
-
-Requires `just >= 1.31` (modules), QEMU, and Nix on the host for
-`just vm eval` / `just vm update`.
-
-## Design notes
-
-**The flake is the only definition of a machine.** `just vm install` runs
-`nixos-install --flake`, so a from-scratch install and an in-place `rebuild`
-produce byte-identical store paths.
-
-**Ricing stays as files.** Hyprland and Quickshell configs are edited live and
-reloaded, not rebuilt — `mkOutOfStoreSymlink` into the working tree.
-
-**Quickshell is pinned.** It is alpha and ships breaking QML API changes, so it
-moves when `flake.lock` says, not when upstream pushes.
-
-**Hyprland is configured in Lua** (v0.55+), not `hyprland.conf`.
+The launcher merges those commands with `.desktop` entries, so typing "theme"
+offers the switches without opening a terminal.
 
 ## Keybinds
 
 | | |
 |---|---|
 | `SUPER+RETURN` | terminal |
-| `SUPER+SPACE` | launcher (apps + `kiwami` commands) |
+| `SUPER+SPACE` | launcher |
 | `SUPER+SHIFT+P` | power menu |
+| `SUPER+SHIFT+R` | restart the shell — bound in the compositor, so it works when the shell is gone |
 | `SUPER+1..9` | workspaces |
 | `XF86Audio*` / `XF86MonBrightness*` | volume and brightness, with OSD |
 
-## Session services
+## Development
 
-Hyprland is launched through UWSM so `graphical-session.target` actually
-activates. Two traps that make session services fail silently — and their fixes
-— are written up in [docs/session-services.md](docs/session-services.md).
+```bash
+just vm install      # wipe + unattended install (~3 min)
+just vm start        # boot headless
+just vm gui          # boot in a window
+just vm reload       # push + restart the shell, no rebuild
+just vm rebuild      # push + nixos-rebuild switch
+just vm screenshot x
+just vm doctor       # or: just vm ssh 'kiwami doctor'
+just vm install-test # installer matrix
+```
 
-## The VM harness
+The VM is aarch64 so it runs natively under HVF on Apple silicon. CI builds
+and boots x86_64, which is the architecture real hardware will use.
 
-Three independent channels into the guest — QMP for framebuffer screenshots and
-key injection, a serial console that works before the network does, and SSH once
-it is up. Plus snapshot/restore for reset-per-iteration.
+## Layout
 
-See [vm/README.md](vm/README.md), especially the gotchas section.
+```
+flake.nix          inputs, hosts, nixosModules.default
+modules/           options, themes, generation, desktop, home-manager
+config/            hyprland.lua, ghostty config, theme palettes
+shell/             Quickshell QML
+cli/               kiwami: install, theme, doctor, commands
+hosts/             per-machine: choices + hardware facts
+vm/                the development VM and its harness
+docs/              notes worth keeping
+```
+
+## Notes
+
+[docs/session-services.md](docs/session-services.md) — how the session is
+wired, and the traps that cost real time.
