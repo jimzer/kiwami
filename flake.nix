@@ -126,6 +126,12 @@
 
               # greetd autologins straight into Hyprland through uwsm.
               machine.wait_for_unit("greetd.service")
+
+              # Every `systemctl --user` below talks to this manager's bus.
+              # Without waiting, an early check races the manager's startup and
+              # fails with "Failed to connect to user scope bus" - which looks
+              # like a broken unit and is really just an impatient test.
+              machine.wait_for_unit("user@1000.service")
               machine.wait_until_succeeds("pgrep -f 'bin/Hyprland'", timeout=120)
 
               # The shell is a user unit gated on WAYLAND_DISPLAY, so its
@@ -142,10 +148,16 @@
               # A flapping unit still matches pgrep, so assert it is not
               # restarting. This is the check that would have caught the
               # shell being broken in CI for two green runs.
-              machine.succeed(
+              #
+              # wait_until_succeeds, not succeed: the user bus can still be
+              # coming up. A genuinely flapping unit only ever grows NRestarts,
+              # so retrying cannot turn a real failure into a pass - it times
+              # out instead.
+              machine.wait_until_succeeds(
                   "su nixos -c 'XDG_RUNTIME_DIR=/run/user/1000 "
                   "systemctl --user show -p NRestarts --value kiwami-shell.service'"
-                  " | grep -qE '^[0-3]$'"
+                  " | grep -qE '^[0-3]$'",
+                  timeout=60,
               )
 
               # Our Hyprland config must actually be loaded. Without this the
