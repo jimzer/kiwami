@@ -31,5 +31,4 @@ check:
 
 # Show repo layout, ignoring build artifacts
 tree:
-    @find . -type f -not -path './vm/disks/*' -not -path './vm/iso/*' \
-        -not -path './vm/keys/*' -not -path './.git/*' -not -name '*.png' | sort
+    @git ls-files
