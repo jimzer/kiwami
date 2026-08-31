@@ -40,13 +40,15 @@ Requires `just >= 1.31` for module support (`mod vm` in the root justfile).
 ## Layout
 
 ```
-config/configuration.nix   bootstrap NixOS config (bootloader, sshd, serial console)
 scripts/run-vm.sh          QEMU invocation
+scripts/install.sh         drives `kiwami install` end to end
+scripts/install-test.sh    installer matrix against scratch disks
 scripts/start-vm.sh        detached launcher (survives tool timeouts)
 scripts/console.py         serial console driver: expect / run / send
 scripts/qmp.py             QMP client: screenshot / key / type
 scripts/vmssh              ssh wrapper
 scripts/snapshot.sh        disk snapshot management
+scripts/stop-vm.sh         graceful shutdown
 disks/  iso/  keys/        gitignored artifacts
 ```
 
@@ -85,6 +87,9 @@ disks/  iso/  keys/        gitignored artifacts
   replay pre-connection output on the socket.
 - **`snapshot.sh list` needs `qemu-img -U`** to read an image the running VM holds a lock on.
 - **No `setsid` on macOS** — `start-vm.sh` uses a Python `fork`+`setsid`.
+
+The guest's configuration is not here — it comes from `hosts/vm-aarch64` in
+the flake, the same as any other machine.
 
 ## Guest
 
