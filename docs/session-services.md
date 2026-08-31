@@ -174,3 +174,27 @@ imports the environment and activates graphical-session.target, both verified
 above - it just is not the wrapper Hyprland looks for. The banner expires on
 its own, which is why it appears in CI screenshots (captured seconds after
 boot) and not in ones taken later.
+
+
+## Trap 6: atomic writes detach a managed symlink
+
+`~/.config/ghostty/config` is a symlink into `/etc`, and `/nix/store` is
+read-only, so it cannot be edited through. But:
+
+```
+$ sed -i 's/foo/bar/' ~/.config/ghostty/config
+$ ls -l ~/.config/ghostty/config
+-r--r--r--  328   # a regular file now, not a symlink
+```
+
+`sed -i` does not edit in place. It writes a temp file and renames it over the
+target, which **replaces the symlink** rather than following it. The result is
+a real file, detached from `/etc`, that silently stops receiving distro
+updates — and it inherits the store's `444`, so it cannot easily be edited
+again either. Nothing looks broken; `/etc` still holds the pristine original.
+
+Editors that save-and-rename, `install`, and some formatters do the same. This
+is a general hazard of the symlink-into-store pattern, and the reason
+`kiwami doctor` checks that entry points still point where we put them. It is
+a warning rather than an error: taking over the file is legitimate if you meant
+to.

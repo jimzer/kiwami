@@ -15,10 +15,23 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 - **Base: NixOS**, not Arch. Considered seriously and reversed twice. Deciding
   factors: `flake.lock` pins Quickshell (an alpha dependency the whole desktop
   sits on), generations give per-config rollback, packages are declared by
-  construction, and `nixosTest` exists. Costs accepted: idiom/ramp tax, 10–40s
-  rebuilds, occasional derivation-writing for niche vendor binaries.
-- **Ricing stays as files.** `~/.config/{hypr,quickshell}` via
-  `mkOutOfStoreSymlink` into the live git checkout — edit and reload, no rebuild.
+  construction, and `nixosTest` exists. Costs accepted: idiom/ramp tax and
+  occasional derivation-writing for niche vendor binaries. Rebuild cost was
+  *measured*, not assumed: 2.5s no-op, 7.7s after a config change, on the
+  aarch64 VM. The early "utter pain" framing was wrong.
+- **Ship config in the app's own format; add options only for what must be set
+  per machine.** `config/hypr/hyprland.lua` and `config/ghostty/defaults` are
+  real files placed read-only into `/etc` by Nix. Generating them from Nix
+  attrsets cost three mechanisms to express eight lines and bought nothing a
+  user could see.
+- **Three roots, one owner each.** `/etc/kiwami` is the distro's (read-only,
+  replaced wholesale on update); `~/.config/…` is the user's (never touched);
+  `~/.local/state/kiwami` is generated. They are joined by the app's own
+  include mechanism — Ghostty's `config-file`, Hyprland's `dofile` — so
+  improving a default never has to touch a user's file.
+- **Entry points are symlinks into `/etc`, not seeded copies.** So we can change the
+  structure itself — add an include, load a new module — and every machine
+  picks it up. Omarchy seeds a real file and needs `migrations/` for this.
 - **CLI is thin.** On NixOS `nixos-rebuild` does the real work, so `kiwami` is a
   wrapper, not a package manager.
 - **Dev VM is aarch64**, native under HVF. Architecture is irrelevant for bar
@@ -38,6 +51,10 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 
 ## Decisions still open
 
+- (?) **Widget plugin search path.** Shadowing per file (user copy wins over
+  `/etc`) is proven to work with a symlink farm, but is not implemented — the
+  shell still loads one tree. Needed only when a second person wants to change
+  a widget without forking.
 - (?) **Quickshell: from scratch vs fork.** Building from scratch is the stated
   goal; forking a public config to restyle is far faster. Possible split: fork to
   learn, rewrite once the API is familiar.
@@ -89,6 +106,20 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 - [ ] Track the impermanence persist-list from the start
 - [ ] *(blocked)* Install NixOS on the real desktop; generate + commit its
       `hardware-configuration.nix`
+
+## The option surface  `[x] DONE`
+
+- [x] `kiwami.*` is the API: `bar.{enable,position,height,left,center,right}`,
+      `theme.{name,themes}`, `terminal.{settings,extraConfig}`,
+      `hyprland.extraConfig`
+- [x] Colours are `types.strMatching "#[0-9a-fA-F]{6}"` — rejects at eval the
+      exact malformed value that shipped earlier
+- [x] `nixosModules.default` exported, so a machine is a small flake importing
+      Kiwami rather than a fork. Verified from a consumer flake pulling from
+      GitHub: their `timeZone` and two Ghostty keys won, our defaults filled
+      the rest, `systemPackages` merged.
+- [x] Bar composes from a generated manifest; `kiwami.bar.position = "bottom"`
+      moves it with no QML change
 
 ## Tier 1 — The product
 
