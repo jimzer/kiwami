@@ -1,6 +1,7 @@
 import Quickshell
 import Quickshell.Services.SystemTray
 import QtQuick
+import ".."   // Theme, resolved from the parent directory
 
 // StatusNotifierItem tray. Empty until something registers, which on a fresh
 // VM is normal - nothing here runs a tray icon by default.

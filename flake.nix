@@ -87,6 +87,9 @@
                 home-manager.nixosModules.home-manager
                 ./modules/common.nix
                 ./modules/desktop.nix
+                ./modules/options.nix
+                ./modules/themes.nix
+                ./modules/generated.nix
               ];
               home-manager.useGlobalPkgs = true;
               home-manager.useUserPackages = true;
@@ -147,6 +150,12 @@
                   timeout=60,
               )
 
+              # The bar manifest is generated from kiwami.bar.*; if this is
+              # missing the shell silently falls back to hardcoded defaults
+              # and the whole option surface is decorative.
+              machine.succeed("test -f /etc/kiwami/bar.json")
+              machine.succeed("grep -q '\"position\": *\"top\"' /etc/kiwami/bar.json || grep -q '\"position\":\"top\"' /etc/kiwami/bar.json")
+
               # Stronger than a screenshot: ask the compositor whether the
               # shell actually mapped a layer surface. A process being alive
               # only proves it started, not that it drew anything.
@@ -176,6 +185,9 @@
           home-manager.nixosModules.home-manager
           ./modules/common.nix
           ./modules/desktop.nix
+          ./modules/options.nix
+          ./modules/themes.nix
+          ./modules/generated.nix
         ];
 
         # Modules reach the flake's own inputs (the kiwami package, quickshell)

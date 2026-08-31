@@ -61,16 +61,7 @@
   # Themes ship with the system so an installed machine has them without a
   # checkout. `kiwami` still prefers ~/kiwami/config/themes when it exists, so
   # editing a theme live keeps working.
-  environment.etc."kiwami/themes".source = ../config/themes;
-
-  # The shell tree ships too, for the same reason: an installed machine has no
-  # checkout, and pointing the unit at one made it restart-loop forever.
-  environment.etc."kiwami/shell".source = ../shell;
-
-  # Hyprland and Ghostty configs, for the same reason again. This is the third
-  # thing that only worked inside a checkout; anything the desktop needs at
-  # runtime belongs here, with the working tree as an override.
-  environment.etc."kiwami/config".source = ../config;
+  # /etc content is generated from options; see modules/generated.nix.
 
   security.polkit.enable = true;
   services.dbus.enable = true;

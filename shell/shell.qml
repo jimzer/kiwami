@@ -1,7 +1,7 @@
 import Quickshell
+import "widgets"
 
 ShellRoot {
-    // One bar per screen.
     Variants {
         model: Quickshell.screens
         Bar {}

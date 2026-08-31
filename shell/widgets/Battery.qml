@@ -1,6 +1,7 @@
 import Quickshell
 import Quickshell.Services.UPower
 import QtQuick
+import ".."   // Theme, resolved from the parent directory
 
 // Hidden entirely when there is no battery, which is the case in the dev VM
 // and on a desktop. Only laptops should see this.

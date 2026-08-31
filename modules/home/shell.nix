@@ -3,7 +3,7 @@
 # Why a unit rather than exec-ing it from Hyprland: Restart=always, real journal
 # logs, and `systemctl --user restart kiwami-shell` as a clean restart to pair
 # with the disabled file watcher. See docs/session-services.md.
-{ config, pkgs, lib, inputs, ... }:
+{ config, pkgs, lib, inputs, osConfig ? null, ... }:
 
 let
   # nixpkgs' quickshell (0.3.0) is in the binary cache for aarch64; the upstream
@@ -53,6 +53,15 @@ in
     };
 
     Service = {
+      # Rebuilding swaps /etc/kiwami/bar.json's symlink target, and a FileView
+      # watch does not survive that - the shell kept its old layout until
+      # restarted by hand. Embedding the manifest path makes the unit itself
+      # change when the manifest does, so activation restarts the shell.
+      X-Kiwami-Bar-Manifest =
+        if osConfig != null
+        then toString (osConfig.environment.etc."kiwami/bar.json".source or "")
+        else "";
+
       # `just vm push` does rm -rf + extract, so a file watcher would fire
       # mid-write and reload against a half-written tree. Restart deliberately.
       Environment = [ "QS_DISABLE_FILE_WATCHER=1" ];

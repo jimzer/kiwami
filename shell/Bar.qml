@@ -1,85 +1,77 @@
 import Quickshell
-import Quickshell.Hyprland
+import Quickshell.Wayland
 import QtQuick
+import "widgets"
 
+// The bar composes itself from Config.bar, which Nix generates. Adding a
+// widget means adding its name to kiwami.bar.right, not editing this file.
 PanelWindow {
     id: bar
     required property var modelData
     screen: modelData
 
-    anchors { top: true; left: true; right: true }
-    implicitHeight: Theme.barHeight
-    color: Theme.bg
+    readonly property var conf: Config.bar
 
-    // Workspaces, read from Hyprland's IPC. Nothing else needed: the
-    // compositor already owns them, the bar only displays them.
-    Row {
-        anchors.left: parent.left
-        anchors.leftMargin: Theme.gap
-        anchors.verticalCenter: parent.verticalCenter
-        spacing: 4
+    anchors {
+        top: conf.position === "top"
+        bottom: conf.position === "bottom"
+        left: true
+        right: true
+    }
+    implicitHeight: conf.height
+    color: Theme.bg
+    visible: conf.enable
+
+    // Name -> component. A user shadowing widgets/Clock.qml replaces the
+    // clock everywhere without touching this mapping.
+    function widgetFor(name) {
+        switch (name) {
+            case "workspaces": return workspacesC;
+            case "window":     return windowC;
+            case "tray":       return trayC;
+            case "battery":    return batteryC;
+            case "clock":      return clockC;
+            default:           return null;
+        }
+    }
+
+    Component { id: workspacesC; Workspaces {} }
+    Component { id: windowC;     Window {} }
+    Component { id: trayC;       Tray {} }
+    Component { id: batteryC;    Battery {} }
+    Component { id: clockC;      Clock {} }
+
+    component Section: Row {
+        required property var names
+        spacing: Theme.gap * 2
 
         Repeater {
-            model: Hyprland.workspaces
-
-            Rectangle {
+            model: parent.names
+            Loader {
                 required property var modelData
-                width: 26
-                height: 22
-                radius: Theme.radius
-                color: modelData.focused ? Theme.accent
-                     : modelData.urgent  ? Theme.urgent
-                     : Theme.bgAlt
-
-                Text {
-                    anchors.centerIn: parent
-                    text: modelData.name
-                    color: modelData.focused ? Theme.bg : Theme.fgDim
-                    font.family: Theme.font
-                    font.pixelSize: Theme.fontSize - 1
-                }
-
-                MouseArea {
-                    anchors.fill: parent
-                    onClicked: Hyprland.dispatch("workspace " + modelData.id)
-                }
+                anchors.verticalCenter: parent.verticalCenter
+                sourceComponent: bar.widgetFor(modelData)
             }
         }
     }
 
-    // Focused window title.
-    Text {
-        anchors.centerIn: parent
-        width: bar.width * 0.4
-        elide: Text.ElideRight
-        horizontalAlignment: Text.AlignHCenter
-        text: Hyprland.activeToplevel ? (Hyprland.activeToplevel.title ?? "") : ""
-        color: Theme.fgDim
-        font.family: Theme.font
-        font.pixelSize: Theme.fontSize
+    Section {
+        names: bar.conf.left
+        anchors.left: parent.left
+        anchors.leftMargin: Theme.gap
+        anchors.verticalCenter: parent.verticalCenter
     }
 
-    SystemClock {
-        id: clock
-        precision: SystemClock.Seconds
+    Section {
+        names: bar.conf.center
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.verticalCenter: parent.verticalCenter
     }
 
-    Row {
+    Section {
+        names: bar.conf.right
         anchors.right: parent.right
         anchors.rightMargin: Theme.gap
         anchors.verticalCenter: parent.verticalCenter
-        spacing: Theme.gap * 2
-
-        Tray { anchors.verticalCenter: parent.verticalCenter }
-
-        Battery { anchors.verticalCenter: parent.verticalCenter }
-
-        Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: Qt.formatDateTime(clock.date, "ddd d MMM  HH:mm:ss")
-            color: Theme.fg
-            font.family: Theme.font
-            font.pixelSize: Theme.fontSize
-        }
     }
 }

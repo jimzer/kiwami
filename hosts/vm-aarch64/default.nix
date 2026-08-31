@@ -6,6 +6,9 @@
     ./hardware-configuration.nix
     ../../modules/common.nix
     ../../modules/desktop.nix
+    ../../modules/options.nix
+    ../../modules/themes.nix
+    ../../modules/generated.nix
   ];
 
   # Home Manager: package layer and dotfile links only, per the design note.
