@@ -21,11 +21,35 @@ let
   # pgrep. Resolved at start time, not build time, since whether a checkout
   # exists is a property of the machine.
   launcher = pkgs.writeShellScript "kiwami-shell" ''
-    tree="$HOME/kiwami/shell"
-    [ -f "$tree/shell.qml" ] || tree=/etc/kiwami/shell
-    echo "kiwami-shell: using $tree"
-    exec ${lib.getExe quickshell} -p "$tree"
+    set -u
+    sys=/etc/kiwami/shell
+    mine="$HOME/.config/kiwami/shell"
+    tree="$HOME/kiwami/shell"                 # a developer's checkout
+    [ -f "$tree/shell.qml" ] || tree="$sys"
+
+    # Quickshell takes one directory - it does not merge. So build the merged
+    # tree here: base first, then the user's files overwriting the links.
+    # Symlinks, so it costs milliseconds and always reflects the current base.
+    merged="''${XDG_RUNTIME_DIR:-/tmp}/kiwami/shell"
+    rm -rf "$merged"
+    mkdir -p "$merged"
+
+    overlay() {
+      [ -d "$1" ] || return 0
+      ( cd "$1" && find . -type f -o -type l ) | while read -r rel; do
+        rel="''${rel#./}"
+        mkdir -p "$merged/$(dirname "$rel")"
+        ln -sfn "$(readlink -f "$1/$rel")" "$merged/$rel"
+      done
+    }
+
+    overlay "$tree"    # what ships, or the checkout when developing
+    overlay "$mine"    # the user's, shadowing by filename
+
+    echo "kiwami-shell: base $tree, overlay $mine"
+    exec ${lib.getExe quickshell} -p "$merged"
   '';
+
 in
 {
   home.packages = [ quickshell ];

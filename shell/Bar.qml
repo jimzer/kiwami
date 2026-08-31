@@ -22,24 +22,14 @@ PanelWindow {
     color: Theme.bg
     visible: conf.enable
 
-    // Name -> component. A user shadowing widgets/Clock.qml replaces the
-    // clock everywhere without touching this mapping.
-    function widgetFor(name) {
-        switch (name) {
-            case "workspaces": return workspacesC;
-            case "window":     return windowC;
-            case "tray":       return trayC;
-            case "battery":    return batteryC;
-            case "clock":      return clockC;
-            default:           return null;
-        }
+    // Widgets resolve by filename, not a hardcoded list: "clock" loads
+    // widgets/Clock.qml from the merged tree, so a user can add
+    // widgets/Weather.qml and name it in kiwami.bar.right without us
+    // knowing it exists.
+    function widgetPath(name) {
+        if (!name || name.length === 0) return "";
+        return "widgets/" + name.charAt(0).toUpperCase() + name.slice(1) + ".qml";
     }
-
-    Component { id: workspacesC; Workspaces {} }
-    Component { id: windowC;     Window {} }
-    Component { id: trayC;       Tray {} }
-    Component { id: batteryC;    Battery {} }
-    Component { id: clockC;      Clock {} }
 
     component Section: Row {
         required property var names
@@ -47,10 +37,24 @@ PanelWindow {
 
         Repeater {
             model: parent.names
+
+            // A third-party widget with a QML error must not take the bar
+            // down with it. Loader isolates the failure: the slot stays
+            // empty and everything else still renders.
             Loader {
+                id: slot
                 required property var modelData
                 anchors.verticalCenter: parent.verticalCenter
-                sourceComponent: bar.widgetFor(modelData)
+                source: bar.widgetPath(modelData)
+                asynchronous: false
+
+                onStatusChanged: {
+                    if (status === Loader.Error) {
+                        console.warn("bar: widget '" + modelData
+                            + "' failed to load from " + source
+                            + " - skipping it");
+                    }
+                }
             }
         }
     }

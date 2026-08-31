@@ -198,3 +198,28 @@ is a general hazard of the symlink-into-store pattern, and the reason
 `kiwami doctor` checks that entry points still point where we put them. It is
 a warning rather than an error: taking over the file is legitimate if you meant
 to.
+
+
+## Shadowing: two things that bite
+
+The shell loads a merged tree - what ships (or a checkout) first, then
+`~/.config/kiwami/shell` overwriting by filename. Two failure modes came out
+of building it.
+
+**A stale override keeps loading.** A file cloned months ago still shadows the
+shipped one, referencing things that have since moved. We hit exactly this: a
+`Bar.qml` copied before widgets moved into `widgets/` failed with
+`Tray is not a type`, and the symptom looked like a shell bug rather than an
+old copy. `kiwami shell clone` therefore records a digest of what it copied,
+and `kiwami shell list` flags an override whose shipped version has changed.
+
+**Isolation has to cover the top level, not just widgets.** A broken widget is
+contained by its Loader, but `shell.qml` originally instantiated Bar, Launcher
+and the rest directly - so one bad override took the entire shell down. Every
+top-level piece now goes through a Loader too, and a failure costs that piece
+only.
+
+One QML detail worth remembering: a `required property` must be supplied when
+the component is created. Setting it in `onLoaded` is too late and the
+component silently fails to build, so a Loader for such a component needs
+`setSource(url, { prop: value })` rather than `source:`.

@@ -51,10 +51,6 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 
 ## Decisions still open
 
-- (?) **Widget plugin search path.** Shadowing per file (user copy wins over
-  `/etc`) is proven to work with a symlink farm, but is not implemented — the
-  shell still loads one tree. Needed only when a second person wants to change
-  a widget without forking.
 - (?) **Quickshell: from scratch vs fork.** Building from scratch is the stated
   goal; forking a public config to restyle is far faster. Possible split: fork to
   learn, rewrite once the API is familiar.
@@ -151,6 +147,17 @@ Legend: `[ ]` todo · `[~]` in progress · `[x]` done · `(?)` needs a decision
 - [~] **Brightness OSD / battery**  *(blocked: needs real hardware)* — written and wired, but *unverified*: the
       VM has no backlight and no battery, so both paths only prove they hide
       cleanly. Needs real hardware.
+
+## Shell customisation  `[x] DONE`
+
+- [x] Widgets resolve by filename, so a user can add `widgets/Weather.qml` and
+      name it in `kiwami.bar.right` without us knowing it exists
+- [x] Merged tree built at shell start: ships/checkout first, then
+      `~/.config/kiwami/shell` shadowing by filename
+- [x] Error isolation at both levels — a broken widget costs that slot, a
+      broken top-level component costs that piece, neither kills the shell
+- [x] `kiwami shell list` / `clone`, with clone recording a digest so list can
+      flag an override whose shipped version has moved on
 
 ## Tier 3 — Differentiators
 

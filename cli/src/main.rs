@@ -1,5 +1,6 @@
 mod commands;
 mod doctor;
+mod shell;
 mod install;
 mod paths;
 mod theme;
@@ -42,12 +43,25 @@ enum Cmd {
     Disks,
     /// Report drift from the declared config, and check the desktop is healthy
     Doctor,
+    /// Inspect and override the desktop shell's QML
+    Shell {
+        #[command(subcommand)]
+        action: ShellCmd,
+    },
     /// Emit the actions the launcher should offer, as JSON
     Commands {
         /// Currently the only supported format; present so the shape is explicit.
         #[arg(long, default_value_t = true)]
         json: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum ShellCmd {
+    /// List shipped components, marking any you have overridden
+    List,
+    /// Copy a shipped component into ~/.config/kiwami/shell so you can edit it
+    Clone { name: String },
 }
 
 #[derive(Subcommand)]
@@ -106,6 +120,16 @@ fn main() -> std::process::ExitCode {
             };
             if let Err(e) = install::run_install(opts) {
                 eprintln!("\ninstall: {e}");
+                return std::process::ExitCode::FAILURE;
+            }
+        }
+        Cmd::Shell { action } => {
+            let r = match action {
+                ShellCmd::List => shell::list(),
+                ShellCmd::Clone { name } => shell::clone(&name),
+            };
+            if let Err(e) = r {
+                eprintln!("{e}");
                 return std::process::ExitCode::FAILURE;
             }
         }
