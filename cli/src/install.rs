@@ -16,8 +16,7 @@ use crate::net;
 /// through, which is worse than refusing up front.
 const MIN_BYTES: u64 = 20 * 1024 * 1024 * 1024;
 
-const ESP_MIB: u64 = 1024;
-
+#[derive(Clone)]
 pub struct Disk {
     pub name: String,
     pub path: PathBuf,
@@ -135,16 +134,6 @@ fn is_nvme_controller_alias(name: &str) -> bool {
         && ns.chars().all(|c| c.is_ascii_digit())
 }
 
-/// Partitions are `nvme0n1p1` on NVMe and `sda1` on SCSI/virtio.
-fn partition_path(disk: &Path, n: u32) -> PathBuf {
-    let s = disk.to_string_lossy();
-    let last = s.chars().last().unwrap_or(' ');
-    if last.is_ascii_digit() {
-        PathBuf::from(format!("{s}p{n}"))
-    } else {
-        PathBuf::from(format!("{s}{n}"))
-    }
-}
 
 fn prompt(question: &str) -> io::Result<String> {
     print!("{question}");
@@ -226,45 +215,75 @@ pub fn run_install(opts: Options) -> Result<(), String> {
         return Err("no disks found".into());
     }
 
-    let target = match &opts.disk {
-        Some(want) => {
-            let want = if want.starts_with("/dev/") { want.clone() } else { format!("/dev/{want}") };
-            disks
-                .into_iter()
-                .find(|d| d.path.to_string_lossy() == want)
-                .ok_or_else(|| format!("no such disk: {want}"))?
+    // An existing host already declares its disks, so that is the target.
+    let declared = if host.create { Vec::new() } else { host_disks(&opts.flake, &host.name)? };
+
+    let targets: Vec<Disk> = if declared.is_empty() {
+        // No declaration yet - a new host, whose disk.nix is written from
+        // this choice.
+        let target = match &opts.disk {
+            Some(want) => {
+                let want =
+                    if want.starts_with("/dev/") { want.clone() } else { format!("/dev/{want}") };
+                disks
+                    .into_iter()
+                    .find(|d| d.path.to_string_lossy() == want)
+                    .ok_or_else(|| format!("no such disk: {want}"))?
+            }
+            None => select_disk(disks)?,
+        };
+        vec![target]
+    } else {
+        if let Some(want) = &opts.disk {
+            let want =
+                if want.starts_with("/dev/") { want.clone() } else { format!("/dev/{want}") };
+            if !declared.iter().any(|d| d.to_string_lossy() == want) {
+                return Err(format!(
+                    "--disk {want} is not what {} declares.\n\
+                     Its disk.nix names: {}\n\
+                     Edit disk.nix instead - the layout is what formats, not this flag.",
+                    host.name,
+                    declared.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join(", ")
+                ));
+            }
         }
-        None => select_disk(disks)?,
+        let mut found = Vec::new();
+        for dev in &declared {
+            let d = disks.iter().find(|d| &d.path == dev).ok_or_else(|| {
+                format!("{} is declared by {} but not present here", dev.display(), host.name)
+            })?;
+            found.push(d.clone());
+        }
+        found
     };
 
-    if target.in_use && !opts.force {
-        return Err(format!(
-            "{} is mounted right now - this looks like the system you are running.\n\
-             Refusing to erase it. Pass --force if you really mean it.",
-            target.path.display()
-        ));
-    }
-
-    if target.bytes < MIN_BYTES {
-        return Err(format!(
-            "{} is {:.1} GiB; Kiwami needs at least {} GiB",
-            target.path.display(),
-            target.gib(),
-            MIN_BYTES / (1024 * 1024 * 1024)
-        ));
+    for t in &targets {
+        if t.in_use && !opts.force {
+            return Err(format!(
+                "{} is mounted right now - this looks like the system you are running.\n\
+                 Refusing to erase it. Pass --force if you really mean it.",
+                t.path.display()
+            ));
+        }
+        if t.bytes < MIN_BYTES {
+            return Err(format!(
+                "{} is {:.1} GiB; Kiwami needs at least {} GiB",
+                t.path.display(),
+                t.gib(),
+                MIN_BYTES / (1024 * 1024 * 1024)
+            ));
+        }
     }
 
     // Everything above this line is read-only.
-    confirm(&target, opts.assume_yes)?;
+    confirm(&targets, opts.assume_yes)?;
 
-    println!("\n==> partitioning {}", target.path.display());
-    partition(&target.path)?;
-
-    println!("==> formatting");
-    format_disk(&target.path)?;
-
-    println!("==> mounting");
-    mount(&target.path)?;
+    // One step, from the host's own disk.nix: disko wipes, partitions,
+    // formats and mounts. The layout is not restated here, which is the point
+    // - it used to live twice, as parted calls in this file and as a
+    // fileSystems module, agreeing only by comment.
+    println!("\n==> partitioning and formatting from {}#{}", opts.flake, host.name);
+    run_disko(&opts.flake, &host.name)?;
 
     // Only now is /mnt populated, which is what nixos-generate-config reads.
     if let Some(repo) = &checkout {
@@ -328,16 +347,19 @@ fn select_disk(disks: Vec<Disk>) -> Result<Disk, String> {
     }
 }
 
-fn confirm(target: &Disk, assume_yes: bool) -> Result<(), String> {
-    println!("\nAbout to install to {}", target.path.display());
-    if !target.is_empty() {
-        println!(
-            "\n  WARNING: {} already has {} partition(s): {}",
-            target.path.display(),
-            target.partitions.len(),
-            target.partitions.join(", ")
-        );
-        println!("  Everything on it will be destroyed.");
+fn confirm(targets: &[Disk], assume_yes: bool) -> Result<(), String> {
+    println!();
+    for t in targets {
+        println!("About to install to {}", t.path.display());
+        if !t.is_empty() {
+            println!(
+                "\n  WARNING: {} already has {} partition(s): {}",
+                t.path.display(),
+                t.partitions.len(),
+                t.partitions.join(", ")
+            );
+            println!("  Everything on it will be destroyed.");
+        }
     }
 
     if assume_yes {
@@ -354,37 +376,8 @@ fn confirm(target: &Disk, assume_yes: bool) -> Result<(), String> {
     Ok(())
 }
 
-fn partition(disk: &Path) -> Result<(), String> {
-    let d = disk.to_string_lossy().to_string();
-    run("parted", &[
-        "-s", &d, "--",
-        "mklabel", "gpt",
-        "mkpart", "ESP", "fat32", "1MiB", &format!("{ESP_MIB}MiB"),
-        "set", "1", "esp", "on",
-        "mkpart", "root", "ext4", &format!("{ESP_MIB}MiB"), "100%",
-    ])?;
-    // mkfs and mount both look devices up by label; udev has not necessarily
-    // created the nodes by the time parted returns.
-    run("udevadm", &["settle", "--timeout=30"])
-}
 
-fn format_disk(disk: &Path) -> Result<(), String> {
-    let esp = partition_path(disk, 1);
-    let root = partition_path(disk, 2);
-    // The labels are a contract: hosts/*/hardware-configuration.nix mounts by
-    // label so a reinstall does not invalidate the config with fresh UUIDs.
-    run("mkfs.fat", &["-F", "32", "-n", "boot", &esp.to_string_lossy()])?;
-    run("mkfs.ext4", &["-q", "-F", "-L", "nixos", &root.to_string_lossy()])?;
-    run("udevadm", &["settle", "--timeout=30"])
-}
 
-fn mount(disk: &Path) -> Result<(), String> {
-    let esp = partition_path(disk, 1);
-    let root = partition_path(disk, 2);
-    run("mount", &[&root.to_string_lossy(), "/mnt"])?;
-    fs::create_dir_all("/mnt/boot").map_err(|e| e.to_string())?;
-    run("mount", &["-o", "umask=077", &esp.to_string_lossy(), "/mnt/boot"])
-}
 
 /// Base names of block devices backing a current mount, e.g. ["vda1", "vda2"].
 fn mounted_devices() -> Vec<String> {
@@ -651,6 +644,74 @@ fn local_checkout(flake: &str) -> Option<PathBuf> {
     }
     let p = PathBuf::from(path);
     p.join("flake.nix").exists().then_some(p)
+}
+
+/// The disks a host's disk.nix declares, resolved to kernel devices.
+///
+/// Once disko owns the layout, the target is whatever disk.nix names - not
+/// whatever a menu selected. A confirmation naming a disk other than the one
+/// about to be erased is worse than no confirmation at all.
+fn host_disks(flake: &str, host: &str) -> Result<Vec<PathBuf>, String> {
+    let out = Command::new("nix")
+        .args([
+            "--extra-experimental-features",
+            "nix-command flakes",
+            "eval",
+            "--json",
+            &format!("{flake}#nixosConfigurations.{host}.config.disko.devices.disk"),
+            "--apply",
+            "ds: map (d: d.device) (builtins.attrValues ds)",
+        ])
+        .output()
+        .map_err(|e| format!("cannot run nix: {e}"))?;
+    if !out.status.success() {
+        // A host with no disko declaration is not an error; it just means the
+        // layout is being chosen here instead.
+        return Ok(Vec::new());
+    }
+    let declared: Vec<String> =
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("unexpected output: {e}"))?;
+
+    declared
+        .into_iter()
+        .map(|d| {
+            // by-id paths are symlinks; the safety checks and /proc/mounts
+            // both speak kernel names.
+            fs::canonicalize(&d)
+                .map_err(|e| format!("{host} declares {d}, absent on this machine ({e})"))
+        })
+        .collect()
+}
+
+/// Wipe, partition, format and mount, all from the host's disk.nix.
+///
+/// Built from the flake rather than fetched: the script that runs is the one
+/// this flake's pinned disko produced for this exact host, so it cannot
+/// disagree with the fileSystems the same declaration generates.
+fn run_disko(flake: &str, host: &str) -> Result<(), String> {
+    let attr = format!("{flake}#nixosConfigurations.{host}.config.system.build.diskoScript");
+    let out = Command::new("nix")
+        .args([
+            "--extra-experimental-features",
+            "nix-command flakes",
+            "build",
+            "--no-link",
+            "--print-out-paths",
+            &attr,
+        ])
+        .output()
+        .map_err(|e| format!("cannot run nix: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "cannot build the disk layout:\n{}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    let script = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if script.is_empty() {
+        return Err("disko produced no script".into());
+    }
+    run(&script, &[])
 }
 
 /// Print the detected disks and exit. Used by tests and by anyone wondering

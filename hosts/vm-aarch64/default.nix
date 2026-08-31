@@ -8,7 +8,7 @@
 {
   imports = [
     ./hardware.nix
-    ../../modules/disk-layout.nix
+    ./disk.nix
   ];
 
   home-manager.users.nixos = {

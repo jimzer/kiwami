@@ -35,7 +35,12 @@ args=(
   -smp "$CPUS" -m "$MEM"
   -drive "if=pflash,format=raw,readonly=on,file=$QEMU_SHARE/edk2-aarch64-code.fd"
   -drive "if=pflash,format=raw,file=$VARS"
-  -drive "file=$DISK,if=virtio,format=qcow2,discard=unmap"
+  # Explicit device rather than `if=virtio`, purely so a serial can be set:
+  # without one QEMU creates no /dev/disk/by-id/ entry, and the installer
+  # writes disko configs by stable id. With the shorthand the VM would be the
+  # one machine that never exercises that path.
+  -drive "file=$DISK,if=none,id=root0,format=qcow2,discard=unmap"
+  -device virtio-blk-pci,drive=root0,serial=kiwami-root
   -device virtio-gpu-pci
   # A sound card with no host output: the guest gets a real PipeWire sink so
   # the volume OSD is testable, without QEMU grabbing the Mac's audio.
@@ -61,8 +66,10 @@ if [[ "$TEST_DISKS" == "1" ]]; then
   args+=(
     -drive "file=$NVME,if=none,id=nvme0,format=qcow2"
     -device nvme,drive=nvme0,serial=kiwami-test-nvme
-    -drive "file=$DIRTY,if=virtio,format=qcow2"
-    -drive "file=$SMALL,if=virtio,format=qcow2"
+    -drive "file=$DIRTY,if=none,id=dirty0,format=qcow2"
+    -device virtio-blk-pci,drive=dirty0,serial=kiwami-test-dirty
+    -drive "file=$SMALL,if=none,id=small0,format=qcow2"
+    -device virtio-blk-pci,drive=small0,serial=kiwami-test-small
   )
 fi
 

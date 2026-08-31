@@ -9,6 +9,14 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Declarative disk layout. The installer writes a disk.nix per machine and
+    # disko both formats from it and derives fileSystems, so the layout is
+    # stated once instead of once in Rust and once in Nix.
+    disko = {
+      url = "github:nix-community/disko";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
     # The desktop shell. Pinned deliberately: Quickshell is alpha and ships
     # breaking QML API changes, so it must move when we say so, not when a
     # distro packager pushes.
@@ -36,6 +44,7 @@
             # Our own hosts are built from the same module we export, so
             # anything that breaks for a consumer breaks for us first.
             self.nixosModules.default
+            inputs.disko.nixosModules.disko
             # Set here rather than in a shared module: nixosTest supplies its
             # own pkgs instance and rejects a config being set from inside.
             { nixpkgs.config.allowUnfree = true; }
@@ -66,6 +75,9 @@
           # installer would fail partway through with "command not found"
           # after it had already started writing. Carry them explicitly.
           #
+          # parted, mkfs and mount are gone: disko's generated script carries
+          # its own dependencies, so the installer runs none of them itself.
+          #
           # nmcli is deliberately NOT here. It is a client for a running
           # NetworkManager daemon, so bundling it would add NM's whole closure
           # to every desktop for a binary that is useless without the service
@@ -73,12 +85,8 @@
           # `kiwami net` looks it up on PATH and says so when it is missing.
           postInstall = ''
             wrapProgram $out/bin/kiwami --prefix PATH : ${pkgs.lib.makeBinPath (with pkgs; [
-              parted
-              dosfstools      # mkfs.fat
-              e2fsprogs       # mkfs.ext4
-              util-linux      # mount
-              systemd         # udevadm
               curl            # the "am I online" probe
+              git             # staging the generated hardware.nix
             ])}
           '';
         };
