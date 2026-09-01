@@ -30,6 +30,15 @@ step "resetting disk"
 "$DIR/stop-vm.sh" || true
 rm -f "$DISK" "$VARS"
 
+# The Kiwami image when it has been built, otherwise the stock NixOS one.
+# Only ours carries the harness key, which is what lets the flake go over ssh
+# instead of down the serial line.
+KIWAMI_ISO="$VM_DIR/iso/kiwami-installer-aarch64.iso"
+if [[ -f "$KIWAMI_ISO" ]]; then
+  export ISO="$KIWAMI_ISO"
+  echo "    using the Kiwami image"
+fi
+
 step "booting installer ISO"
 "$DIR/start-vm.sh" install headless
 
@@ -38,18 +47,37 @@ TIMEOUT=240 $CONSOLE expect 'nixos@nixos' >/dev/null || { echo "installer never 
 $CONSOLE send 'sudo -i' >/dev/null; sleep 1
 
 step "pushing the flake to the installer"
-# Chunked base64 over the serial line: a tty in canonical mode truncates
-# lines past ~4096 bytes, so this cannot go in one write.
-B64=$(cd "$VM_DIR/.." && COPYFILE_DISABLE=1 tar --no-xattrs --exclude='./cli/target' --exclude='cli/target' -czf - \
-        flake.nix flake.lock hosts modules config shell cli | base64 | tr -d '\n')
-echo "    payload: ${#B64} chars"
-$CONSOLE run 'rm -rf /tmp/kiwami && mkdir -p /tmp/kiwami && rm -f /tmp/k.b64' >/dev/null
-for (( i=0; i<${#B64}; i+=2500 )); do
-  $CONSOLE run "printf '%s' '${B64:$i:2500}' >> /tmp/k.b64" >/dev/null
-done
-$CONSOLE run 'base64 -d /tmp/k.b64 | tar xzf - -C /tmp/kiwami' >/dev/null
+# Over ssh when the installer has our key, which is every image we build. The
+# fallback is chunked base64 down the serial line, and it only exists for the
+# stock NixOS ISO: a tty in canonical mode truncates lines past ~4096 bytes,
+# so a 40MB tarball becomes some sixteen thousand writes.
+TAR=(env COPYFILE_DISABLE=1 tar --no-xattrs --exclude='./cli/target' --exclude='cli/target'
+     -czf - flake.nix flake.lock hosts modules config shell cli)
+
+if "$DIR/vmssh" 'true' 2>/dev/null; then
+  echo "    over ssh"
+  (cd "$VM_DIR/.." && "${TAR[@]}") \
+    | "$DIR/vmssh" 'rm -rf /tmp/kiwami && mkdir -p /tmp/kiwami && tar xzf - -C /tmp/kiwami'
+else
+  echo "    over serial (stock ISO, no key)"
+  B64=$(cd "$VM_DIR/.." && "${TAR[@]}" | base64 | tr -d '\n')
+  echo "    payload: ${#B64} chars"
+  $CONSOLE run 'rm -rf /tmp/kiwami && mkdir -p /tmp/kiwami && rm -f /tmp/k.b64' >/dev/null
+  for (( i=0; i<${#B64}; i+=2500 )); do
+    $CONSOLE run "printf '%s' '${B64:$i:2500}' >> /tmp/k.b64" >/dev/null
+  done
+  $CONSOLE run 'base64 -d /tmp/k.b64 | tar xzf - -C /tmp/kiwami' >/dev/null
+fi
+
 LOCAL_SUM=$(cd "$VM_DIR/.." && find flake.nix flake.lock hosts modules config shell cli/src -type f | sort | xargs cat | shasum | cut -d' ' -f1)
-REMOTE_SUM=$($CONSOLE run 'cd /tmp/kiwami && find flake.nix flake.lock hosts modules config shell cli/src -type f | sort | xargs cat | sha1sum | cut -d" " -f1' | tr -d '[:space:]')
+# The checksum stays for both paths. Over ssh corruption is unlikely, but the
+# point is that the tree being installed is the tree on this machine, and that
+# is worth asserting however it got there.
+if "$DIR/vmssh" 'true' 2>/dev/null; then
+  REMOTE_SUM=$("$DIR/vmssh" 'cd /tmp/kiwami && find flake.nix flake.lock hosts modules config shell cli/src -type f | sort | xargs cat | sha1sum | cut -d" " -f1' | tr -d '[:space:]')
+else
+  REMOTE_SUM=$($CONSOLE run 'cd /tmp/kiwami && find flake.nix flake.lock hosts modules config shell cli/src -type f | sort | xargs cat | sha1sum | cut -d" " -f1' | tr -d '[:space:]')
+fi
 [[ "$LOCAL_SUM" == "$REMOTE_SUM" ]] || { echo "flake transfer corrupted ($LOCAL_SUM != $REMOTE_SUM)"; exit 1; }
 echo "    checksum ok"
 
