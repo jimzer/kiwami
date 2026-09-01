@@ -183,3 +183,39 @@ Hyprland prints "started without start-hyprland" for a few seconds under UWSM.
 Cosmetic: UWSM does the session setup the warning refers to, it is just not the
 wrapper Hyprland looks for. It expires, which is why it appears in screenshots
 taken seconds after boot and not in later ones.
+
+## Driving the desktop without fingers
+
+The shell can be exercised remotely - which is what makes developing it on a
+machine you are not sitting at practical. Four things, and the first is the one
+that wastes an afternoon.
+
+**`hyprctl dispatch` takes Lua, because the config is Lua.** It wraps its
+arguments as Lua source, so the syntax from every tutorial is a parse error:
+
+    $ hyprctl dispatch global kiwami:launcher
+    error: [string "return hl.dispatch(global kiwami:launcher)"]:1: ')' expected
+
+    $ hyprctl dispatch 'hl.dsp.global("kiwami:launcher")'
+    ok
+
+Same family as `hyprctl` reporting every bind as `__lua`, which is why the CI
+test checks `gaps_in` rather than keybinds.
+
+**`wtype` types, but does not trigger binds.** Text reaches the focused
+surface - typing into the launcher's search box filters it - but a synthetic
+`SUPER+SPACE` does not fire the Hyprland bind. Use the dispatcher for
+shortcuts and `wtype` for text.
+
+**`wlrctl pointer move|click`** works, via the wlroots virtual-pointer
+protocol. `hyprctl cursorpos` confirms it moved.
+
+**Assert a surface, not a screenshot.** `hyprctl layers` names every layer
+surface, so "the launcher opened" is `grep kiwami-launcher` rather than
+eyeballing a picture. A screenshot proves it *rendered*, which is a different
+and weaker claim - the first frame may not have landed yet.
+
+Both tools are ordinary Wayland clients using the virtual-keyboard and
+virtual-pointer protocols, so they need session access and nothing more.
+`ydotool` would cover both from one binary, but only by way of a root daemon
+holding /dev/uinput open - a much larger surface for the same result.

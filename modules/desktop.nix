@@ -64,6 +64,17 @@ in
     wl-clipboard
     grim
     slurp
+    # Synthetic input, so the desktop can be driven by something other than
+    # fingers: pressing SUPER+SPACE and checking a launcher actually appeared
+    # is a test, watching the process exist is not.
+    #
+    # Both are plain Wayland clients using the virtual-keyboard and
+    # virtual-pointer protocols, so they need session access and nothing more.
+    # ydotool would cover both from one binary, but only by way of a root
+    # daemon holding /dev/uinput open - a much larger surface for the same
+    # result.
+    wtype             # keyboard
+    wlrctl            # pointer, and window queries
   ];
 
   fonts.packages = with pkgs; [
