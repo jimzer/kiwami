@@ -373,28 +373,28 @@ fn hardware_drift() -> Finding {
         return Finding::new(Level::Ok, "hardware.nix matches this machine");
     }
 
-    // availableKernelModules is not an inventory of hardware. It is what the
-    // initrd carries in order to reach the root filesystem; afterwards the
-    // kernel loads everything else on demand from modalias, and nothing reads
-    // that file again. So the two directions are not symmetric: extra entries
-    // cost a slightly larger initrd, missing ones can cost a machine that does
-    // not boot.
+    // availableKernelModules cannot be checked this way, in either direction.
     //
-    // Detection reflects whatever was attached at the time, and the installer
-    // USB puts uas and sd_mod in every generated file - so a committed
-    // superset is correct, and reporting it flags every clean install.
-    let is_modules = |l: &String| l.contains("availableKernelModules");
+    // nixos-generate-config reports drivers for storage that is attached when
+    // it runs, not the set the initrd needs to reach root. So the committed
+    // file gains uas and sd_mod from the installer USB, and loses them the
+    // moment the stick is pulled - and a drive plugged in next week adds
+    // entries that were never missing. Both readings are noise.
+    //
+    // The true question - can the initrd still reach root - is not answerable
+    // from this comparison either. This VM's root is virtio_blk, which is in
+    // no committed list here and boots regardless, because NixOS ships a
+    // default set and some drivers are built into the kernel.
+    //
+    // So the module lists are reported and not judged. Everything else in the
+    // file - CPU vendor, microcode, hostPlatform, the imports - has no such
+    // ambiguity and still has to match exactly.
+    let is_modules = |l: &String| l.contains("KernelModules");
     let committed_modules: Vec<String> =
         a.iter().filter(|l| is_modules(l)).flat_map(|l| list_items(l)).collect();
     let detected_modules: Vec<String> =
         b.iter().filter(|l| is_modules(l)).flat_map(|l| list_items(l)).collect();
-    let missing_modules: Vec<String> = detected_modules
-        .iter()
-        .filter(|m| !committed_modules.contains(m))
-        .cloned()
-        .collect();
 
-    // Everything that is not a module list still has to match exactly.
     let a_rest: Vec<&String> = a.iter().filter(|l| !is_modules(l)).collect();
     let b_rest: Vec<&String> = b.iter().filter(|l| !is_modules(l)).collect();
     let added: Vec<String> =
@@ -402,25 +402,29 @@ fn hardware_drift() -> Finding {
     let gone: Vec<String> =
         a_rest.iter().filter(|l| !b_rest.contains(l)).map(|l| (*l).clone()).collect();
 
-    if added.is_empty() && gone.is_empty() && missing_modules.is_empty() {
-        let extra = committed_modules.len() - detected_modules.len();
-        return Finding::new(Level::Ok, "hardware.nix covers this machine").detail(
-            if extra > 0 {
-                format!("{extra} initrd module(s) beyond what is attached now, which is harmless")
-            } else {
-                "initrd modules match what is detected".to_string()
-            },
-        );
+    if added.is_empty() && gone.is_empty() {
+        let only_here: Vec<&String> =
+            committed_modules.iter().filter(|m| !detected_modules.contains(m)).collect();
+        let only_now: Vec<&String> =
+            detected_modules.iter().filter(|m| !committed_modules.contains(m)).collect();
+        let note = if only_here.is_empty() && only_now.is_empty() {
+            "initrd modules also match".to_string()
+        } else {
+            format!(
+                "initrd modules differ ({} committed-only, {} detected-only), which \
+                 reflects what was plugged in and is not checked",
+                only_here.len(),
+                only_now.len()
+            )
+        };
+        return Finding::new(Level::Ok, "hardware.nix matches this machine").detail(note);
     }
 
     let mut detail = String::new();
-    for m in missing_modules.iter().take(4) {
-        detail.push_str(&format!("initrd is missing {m}\n"));
-    }
-    for l in gone.iter().take(3) {
+    for l in gone.iter().take(4) {
         detail.push_str(&format!("- {l}\n"));
     }
-    for l in added.iter().take(3) {
+    for l in added.iter().take(4) {
         detail.push_str(&format!("+ {l}\n"));
     }
 
