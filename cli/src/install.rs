@@ -452,6 +452,9 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     let flake_ref = format!("{}#{}", flake, host.name);
     run("nixos-install", &["--flake", &flake_ref, "--no-root-passwd"])?;
 
+    println!("==> carrying network state over");
+    carry_network_state()?;
+
     println!("==> setting the boot order");
     fix_boot_order()?;
 
@@ -1502,6 +1505,49 @@ fn fix_boot_order() -> Result<(), String> {
     let joined = new.join(",");
     run("nixos-enter", &["--root", "/mnt", "--", "efibootmgr", "-o", &joined, "-t", "1"])?;
     println!("    boot order -> {joined}");
+    Ok(())
+}
+
+/// Carry the installer's network state onto the installed system.
+///
+/// A wifi network joined during the install, and a tailnet joined to let
+/// somebody help with it, both live on the installer's tmpfs. Without this
+/// they evaporate at the first reboot: the machine comes up with no way to
+/// reach a network, having been connected to one minutes earlier, and whoever
+/// was helping is locked out at precisely the moment something might need
+/// fixing.
+///
+/// Both are credentials, so both are copied with their permissions intact.
+fn carry_network_state() -> Result<(), String> {
+    // NetworkManager profiles: your own wifi passwords, mode 0600, exactly as
+    // NetworkManager already stores them.
+    let profiles = Path::new("/etc/NetworkManager/system-connections");
+    let saved: Vec<_> = fs::read_dir(profiles)
+        .map(|d| d.filter_map(|e| e.ok()).map(|e| e.path()).collect())
+        .unwrap_or_default();
+    if !saved.is_empty() {
+        let dest = Path::new("/mnt/etc/NetworkManager/system-connections");
+        fs::create_dir_all(dest).map_err(|e| e.to_string())?;
+        for f in &saved {
+            run("cp", &["-a", &f.to_string_lossy(), &dest.to_string_lossy()])?;
+        }
+        println!("    {} wifi network(s) carried over", saved.len());
+    }
+
+    // The tailnet node identity. Carrying it means the installed machine comes
+    // back as the same node rather than needing a fresh browser login - which
+    // also means remote access survives the reboot, so it is said out loud
+    // rather than done quietly.
+    let state = Path::new("/var/lib/tailscale/tailscaled.state");
+    if state.exists() {
+        let dest = Path::new("/mnt/var/lib/tailscale");
+        fs::create_dir_all(dest).map_err(|e| e.to_string())?;
+        run("cp", &["-a", &state.to_string_lossy(), &dest.to_string_lossy()])?;
+        println!(
+            "    tailnet login carried over - this machine stays reachable after reboot.\n\
+             \x20   Run `tailscale logout` on it to undo that."
+        );
+    }
     Ok(())
 }
 
