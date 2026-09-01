@@ -297,10 +297,27 @@
               # A throwaway image booted in QEMU does not care about its size.
               isoImage.squashfsCompression = "zstd -Xcompression-level 3";
 
+              # Long enough to actually catch. The default hurried past too
+              # fast to pick anything from the boot menu.
+              boot.loader.timeout = 10;
+
               # Keep the serial console so the harness can drive the image
               # exactly as it drives the stock ISO.
+              #
+              # copytoram reads the squashfs into memory once, at boot, and
+              # runs from there. Without it the whole live system is paged off
+              # the USB stick for the length of the install, and a link that
+              # drops - a portable SSD renegotiating power, a marginal USB-C
+              # port - takes everything with it: squashfs I/O errors, then
+              # processes segfaulting because their pages cannot be read back.
+              # Seen on an XPS 13 mid-install.
+              #
+              # It costs the image's size in RAM (1.5G here) and a slower boot,
+              # which is one long sequential read instead of thousands of small
+              # random ones under load. That trade is worth taking by default;
+              # a machine too small for it is not one this installs on.
               boot.kernelParams =
-                [ "console=tty0" ]
+                [ "console=tty0" "copytoram" ]
                 ++ lib.optional (system == "aarch64-linux") "console=ttyAMA0,115200"
                 ++ lib.optional (system == "x86_64-linux") "console=ttyS0,115200";
 
