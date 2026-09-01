@@ -373,35 +373,54 @@ fn hardware_drift() -> Finding {
         return Finding::new(Level::Ok, "hardware.nix matches this machine");
     }
 
-    let added: Vec<_> = b.iter().filter(|l| !a.contains(l)).cloned().collect();
-    let gone: Vec<_> = a.iter().filter(|l| !b.contains(l)).cloned().collect();
-
     // availableKernelModules is not an inventory of hardware. It is what the
-    // initrd carries in order to reach the root filesystem, and after that the
-    // kernel loads everything else on demand from modalias. So a committed
-    // list that is a superset of what is detected now is fine - detection
-    // reflects whatever happened to be attached, and the installer USB adds
-    // uas and sd_mod on every single install.
+    // initrd carries in order to reach the root filesystem; afterwards the
+    // kernel loads everything else on demand from modalias, and nothing reads
+    // that file again. So the two directions are not symmetric: extra entries
+    // cost a slightly larger initrd, missing ones can cost a machine that does
+    // not boot.
     //
-    // The asymmetry is the point: extra modules cost a slightly larger initrd,
-    // missing ones can cost a machine that does not boot.
-    let only_superset = gone.is_empty()
-        && added.iter().all(|l| l.contains("availableKernelModules"))
-        && added.iter().all(|l| {
-            let fresh = list_items(l);
-            a.iter()
-                .filter(|c| c.contains("availableKernelModules"))
-                .any(|c| fresh.iter().all(|m| list_items(c).contains(m)))
-        });
-    if only_superset {
-        return Finding::new(Level::Ok, "hardware.nix covers this machine")
-            .detail("committed initrd modules are a superset of what is detected now");
+    // Detection reflects whatever was attached at the time, and the installer
+    // USB puts uas and sd_mod in every generated file - so a committed
+    // superset is correct, and reporting it flags every clean install.
+    let is_modules = |l: &String| l.contains("availableKernelModules");
+    let committed_modules: Vec<String> =
+        a.iter().filter(|l| is_modules(l)).flat_map(|l| list_items(l)).collect();
+    let detected_modules: Vec<String> =
+        b.iter().filter(|l| is_modules(l)).flat_map(|l| list_items(l)).collect();
+    let missing_modules: Vec<String> = detected_modules
+        .iter()
+        .filter(|m| !committed_modules.contains(m))
+        .cloned()
+        .collect();
+
+    // Everything that is not a module list still has to match exactly.
+    let a_rest: Vec<&String> = a.iter().filter(|l| !is_modules(l)).collect();
+    let b_rest: Vec<&String> = b.iter().filter(|l| !is_modules(l)).collect();
+    let added: Vec<String> =
+        b_rest.iter().filter(|l| !a_rest.contains(l)).map(|l| (*l).clone()).collect();
+    let gone: Vec<String> =
+        a_rest.iter().filter(|l| !b_rest.contains(l)).map(|l| (*l).clone()).collect();
+
+    if added.is_empty() && gone.is_empty() && missing_modules.is_empty() {
+        let extra = committed_modules.len() - detected_modules.len();
+        return Finding::new(Level::Ok, "hardware.nix covers this machine").detail(
+            if extra > 0 {
+                format!("{extra} initrd module(s) beyond what is attached now, which is harmless")
+            } else {
+                "initrd modules match what is detected".to_string()
+            },
+        );
     }
+
     let mut detail = String::new();
-    for l in gone.iter().take(4) {
+    for m in missing_modules.iter().take(4) {
+        detail.push_str(&format!("initrd is missing {m}\n"));
+    }
+    for l in gone.iter().take(3) {
         detail.push_str(&format!("- {l}\n"));
     }
-    for l in added.iter().take(4) {
+    for l in added.iter().take(3) {
         detail.push_str(&format!("+ {l}\n"));
     }
 
