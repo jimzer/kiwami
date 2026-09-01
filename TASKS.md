@@ -122,6 +122,22 @@ bootable `.iso` is a manual job. The image is not a `hosts/` entry: those all
 get `nixosModules.default`, and an installer should not carry a desktop it
 never starts.
 
+**Real hardware** — an XPS 13 9380 runs it. Installed from the built image,
+boots through a greeter, on wifi, on the tailnet, desktop rendering on Intel
+graphics rather than llvmpipe. Reachable and rebuildable remotely, which is
+how most of the last stretch was done.
+
+**Remote driving** — `hyprctl dispatch 'hl.dsp.global("...")'` for shortcuts,
+`wtype` for text, `wlrctl` for the pointer, `grim` to see the result, and
+`hyprctl layers` to assert a surface exists rather than trusting a picture.
+Enough to develop the shell on a machine nobody is sitting at.
+
+**Impermanence, phase 0** — `kiwami.persist` declares what must survive,
+rendered to `/etc/kiwami/persist.json`, and `doctor` reports `/var/lib` state
+that nothing declared. Nothing is wiped. It found `/var/lib/NetworkManager` on
+its first run: the wifi profiles were declared, NM's own leases and
+seen-bssids were not, so networks would have been half-remembered.
+
 **Harness** — `just vm practice` boots the ISO in a window on a scratch disk
 for walking the installer by hand; it found the inverted installed-system
 guard within a minute, which no automated run could because they all pass
@@ -163,8 +179,27 @@ boot test with screenshots).
 - [ ] The login banner hardcodes the clone URL; generate it from the flake
       rather than letting a moved repo rot it silently
 
-### Impermanence
-- [ ] **Phase 0, start now:** generate `/etc/kiwami/persist.json` from the
+### Impermanence  *(phase 0 done; btrfs chosen)*
+- [ ] `disk.nix` gains a btrfs variant: one partition, subvolumes `@root`
+      `@nix` `@persist` `@home`. Disko does subvolumes natively; sizes stay
+      shared rather than guessed now
+- [ ] Blank snapshot of `@root` taken at install, via disko's `postCreateHook`
+- [ ] Initrd rolls `@root` back to that snapshot every boot. It has to happen
+      before root is mounted - you cannot delete the subvolume you are running
+      from
+- [ ] **Assert the rollback happened.** Its failure mode is silent in the
+      worst direction: nothing is wiped, everything persists, and the machine
+      looks perfectly healthy
+- [ ] Keep the previous `@root` rather than deleting it, so "what did I
+      forget" is a diff against a real filesystem instead of a guess
+- [ ] `@home` stays persistent to begin with. Tighten later, once phase 0 has
+      shown what actually lives there
+- [ ] Rehearse in the VM: generous list, reinstall, reboot, see what breaks
+- [ ] Then a fifth wizard question, then the XPS - which means reinstalling it,
+      since one ext4 root cannot be split in place
+
+### Impermanence (original plan, kept for the reasoning)
+- [x] **Phase 0:** generate `/etc/kiwami/persist.json` from the
       config and have `doctor` report paths that exist and are not persisted.
       Pure reporting, builds the list empirically
 - [ ] Phase 1: rehearse in the VM with a generous list, reinstall, see what
