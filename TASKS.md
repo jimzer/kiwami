@@ -94,10 +94,28 @@ scaffolded then yours). Mounts are shared in `modules/disk-layout.nix` and go
 by label, matching what `install.rs` writes. `nixosConfigurations` is a
 directory listing, so a new machine is a folder and nothing edits `flake.nix`.
 
+**Installer image** — `nixosConfigurations.installer-{x86_64,aarch64}` with
+kiwami, git, flakes and a banner saying what to run. Measured: **83s to build,
+1.5 GB**, on a two-core runner with zstd compression. Kept off the routine
+loop anyway — `just check` asserts the image's contents by evaluation in about
+a second, CI builds the installer *system* closure on every push, and the
+bootable `.iso` is a manual job. The image is not a `hosts/` entry: those all
+get `nixosModules.default`, and an installer should not carry a desktop it
+never starts.
+
 **Harness** — `just vm practice` boots the ISO in a window on a scratch disk
 for walking the installer by hand; it found the inverted installed-system
 guard within a minute, which no automated run could because they all pass
 --force.
+
+**Installer image** — `nixosConfigurations.installer-{x86_64,aarch64}` with
+kiwami, git, flakes and a banner saying what to run. Measured: **83s to build,
+1.5 GB**, on a two-core runner with zstd compression. Kept off the routine
+loop anyway — `just check` asserts the image's contents by evaluation in about
+a second, CI builds the installer *system* closure on every push, and the
+bootable `.iso` is a manual job. The image is not a `hosts/` entry: those all
+get `nixosModules.default`, and an installer should not carry a desktop it
+never starts.
 
 **Harness** — 3-minute unattended install, QMP/serial/SSH channels,
 snapshot/reset, installer matrix (33 checks), CI on x86_64 (evaluate, build,
@@ -115,23 +133,12 @@ boot test with screenshots).
 - [ ] Copy on select. Paste needs synthetic input and stays a flag, never a
       promise
 
-### Custom ISO
-- [ ] Bake `kiwami` in so a person types `kiwami install`, not a `nix run`
-      incantation, and clone the flake into place — installing a *new* machine
-      needs a writable checkout to generate `hardware.nix` into, which a
-      `github:` reference can never be
-- [ ] `nixosConfigurations.installer` from `installation-cd-minimal.nix`, with
-      `kiwami` baked in and flakes enabled
-- [ ] Autologin into the installer
-- [ ] Do **not** bake the flake source: `git clone` gives the same writable
-      working tree and is never stale. Baking would not buy an offline
-      install anyway — the closure still comes from the binary cache
-- [ ] Offline install, if wanted at all, is a *separate* variant:
-      `isoImage.storeContents = [ <target>.config.system.build.toplevel ]`
-      puts the whole closure on the ISO. Costs a multi-GB image pinned to one
-      revision, so it must not be the default
-- [ ] Build in CI (x86_64 cannot be built on the Mac); boot it in the VM and
-      run the existing matrix against it
+### Custom ISO  *(remaining: boot it)*
+- [ ] Boot the built image in QEMU and run the matrix against it, rather than
+      against the stock NixOS ISO
+- [ ] aarch64 image for the dev VM. The Mac cannot build Linux at all, so it
+      has to be built inside the VM or in CI, unlike everything else in the
+      loop
 
 ### Impermanence
 - [ ] **Phase 0, start now:** generate `/etc/kiwami/persist.json` from the
