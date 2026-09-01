@@ -79,6 +79,11 @@ lint:
 # Everything that can be verified without a Linux builder.
 check: lint eval
 
+# Write an installer image to a removable drive, by name rather than by
+# /dev/diskN - which moves when you replug things.
+flash ISO NAME="Portable SSD T5":
+    @./scripts/flash.sh "{{ISO}}" "{{NAME}}"
+
 # Show repo layout, ignoring build artifacts
 tree:
     @git ls-files
