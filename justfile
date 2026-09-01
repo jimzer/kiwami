@@ -49,6 +49,22 @@ eval:
       fi
     done
 
+    # What the installer image must contain, asserted without building one.
+    # Compressing the squashfs dominates an ISO build and is redone in full
+    # for the smallest change, so the loop that catches mistakes should never
+    # touch it.
+    for iso in installer-x86_64 installer-aarch64; do
+      printf '  %-14s ' "$iso"
+      want='c: assert builtins.any (p: (p.pname or p.name or "") == "kiwami") c.environment.systemPackages;
+            assert builtins.elem "flakes" c.nix.settings.experimental-features;
+            assert c.services.getty.autologinUser != null; true'
+      if err=$(nix eval --apply "$want" ".#nixosConfigurations.$iso.config" 2>&1 >/dev/null); then
+        echo ok
+      else
+        echo FAIL; echo "$err" >&2; exit 1
+      fi
+    done
+
 # Syntax of every script and justfile. Fast; evaluates no Nix.
 lint:
     @rc=0; for f in vm/scripts/*.sh; do \

@@ -236,6 +236,60 @@
       };
 
       nixosConfigurations =
-        nixpkgs.lib.genAttrs hostNames (name: mkHost [ (./hosts + "/${name}") ]);
+        # The installer image. Deliberately not a hosts/ entry: those all get
+        # nixosModules.default, and an installer has no business carrying a
+        # Hyprland desktop it will never start.
+        let mkInstaller = system:
+        nixpkgs.lib.nixosSystem {
+          specialArgs = { inherit inputs; };
+          modules = [
+            ({ modulesPath, pkgs, lib, ... }: {
+              imports = [ (modulesPath + "/installer/cd-dvd/installation-cd-minimal.nix") ];
+
+              nixpkgs.hostPlatform = system;
+
+              # The whole point: `kiwami install`, not a nix run incantation.
+              # git comes too - installing a new machine needs a writable
+              # checkout to generate hardware.nix into.
+              environment.systemPackages = [ self.packages.${system}.kiwami pkgs.git ];
+
+              # The installer shells out to `nix build` for the disko script,
+              # and the stock ISO does not enable flakes.
+              nix.settings.experimental-features = [ "nix-command" "flakes" ];
+
+              # zstd, not the default xz: the image is recompressed in full for
+              # every change, however small, and that cost dominates the build.
+              # A throwaway image booted in QEMU does not care about its size.
+              isoImage.squashfsCompression = "zstd -Xcompression-level 3";
+
+              # Keep the serial console so the harness can drive the image
+              # exactly as it drives the stock ISO.
+              boot.kernelParams =
+                [ "console=tty0" ]
+                ++ lib.optional (system == "aarch64-linux") "console=ttyAMA0,115200"
+                ++ lib.optional (system == "x86_64-linux") "console=ttyS0,115200";
+
+              services.getty.helpLine = lib.mkForce ''
+
+                Kiwami installer.
+
+                  sudo kiwami net                 get online, if you are not
+                  sudo kiwami install             reinstall a machine this flake already describes
+
+                For a new machine, which needs somewhere to write its detected
+                hardware:
+
+                  git clone https://github.com/jimzer/kiwami ~/kiwami
+                  sudo kiwami install --flake ~/kiwami --host <name> --new
+              '';
+            })
+          ];
+        };
+        in
+        nixpkgs.lib.genAttrs hostNames (name: mkHost [ (./hosts + "/${name}") ])
+        // {
+          installer-x86_64 = mkInstaller "x86_64-linux";
+          installer-aarch64 = mkInstaller "aarch64-linux";
+        };
     };
 }

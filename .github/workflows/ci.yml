@@ -62,6 +62,40 @@ jobs:
           nix build --print-build-logs \
             ".#nixosConfigurations.vm-x86_64.config.system.build.toplevel"
 
+      # The installer system, not the image: this is everything that can go
+      # wrong with the ISO's configuration, without paying for squashfs
+      # compression on every push.
+      - name: installer system closure
+        run: |
+          nix build --print-build-logs \
+            ".#nixosConfigurations.installer-x86_64.config.system.build.toplevel"
+
+  # The actual bootable image. Separate and manual: compressing the squashfs
+  # is the expensive part of an ISO build and is redone in full for the
+  # smallest change, so it does not belong on every push. Everything about the
+  # image's *configuration* is covered by the closure build above.
+  iso:
+    name: installer iso
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - name: build
+        run: |
+          start=$SECONDS
+          nix build --print-build-logs \
+            ".#nixosConfigurations.installer-x86_64.config.system.build.isoImage"
+          echo "took $((SECONDS - start))s"
+          ls -lh result/iso/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kiwami-installer-x86_64
+          path: result/iso/*.iso
+          if-no-files-found: error
+
   # Boots the desktop in a VM and asserts the session actually comes up.
   # Needs a Linux host, which is the whole reason it lives here and not on
   # the development machine.
