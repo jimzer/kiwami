@@ -72,8 +72,11 @@ check "cannot add a host to a fetched flake" "fetched read-only" \
   "sudo kiwami install --force --flake github:jimzer/kiwami --host laptop --new --disk /dev/vdc --yes"
 
 # --- prompts -------------------------------------------------------------
+# Its own host name: this is the one check that accepts the layout, which
+# creates hosts/<name>/ - and a host that exists takes the already-declared
+# path, so reusing tmptest would make every later menu check test nothing.
 check "warns before erasing a non-empty disk" "Everything on it will be destroyed" \
-  "echo no | $KNEW --disk /dev/vdb"
+  "printf 'n\nn\nn\ni\nno\n' | sudo kiwami install --force --flake $FLAKE --host tmpaccept --new --disk /dev/vdb"
 check "targets the disk disk.nix names" "About to install to /dev/vda" \
   "echo no | $K"
 check "offers a numbered disk menu"    "Install to which disk?" \
@@ -83,10 +86,37 @@ check "rejects an out-of-range choice" "Enter a number between" \
 check "offers a numbered host menu"    "Install which host?" \
   "printf '1\n1\nno\n' | sudo kiwami install --force --flake $FLAKE"
 
+# --- the layout wizard ---------------------------------------------------
+# Each of these aborts at the review step, so nothing is ever formatted.
+WIZ="sudo timeout 90 kiwami install --force --flake $FLAKE --host wiztest --new"
+# A leftover hosts/wiztest would make the host already-declared, and every
+# check below would silently exercise the wrong path.
+"$SSH" "sudo rm -rf $FLAKE/hosts/wiztest" >/dev/null 2>&1
+check "wizard writes a disko layout"   "disko.devices.disk" \
+  "printf '1\nn\nn\nn\na\n' | $WIZ"
+check "names disks by stable id"       "/dev/disk/by-id/" \
+  "printf '1\nn\nn\nn\na\n' | $WIZ"
+check "prefers the readable id alias"  "nvme-QEMU_NVMe_Ctrl_kiwami-test-nvme" \
+  "printf '1\nn\nn\nn\na\n' | $WIZ"
+check "hibernation adds a sized swap"  "type = \"swap\"" \
+  "printf '1\nn\nn\ny\na\n' | $WIZ"
+check "encryption wraps root in luks"  "type = \"luks\"" \
+  "printf '1\nn\ny\nn\na\n' | $WIZ"
+check "refuses encrypt plus hibernate" "needs the swap area inside" \
+  "printf '1\nn\ny\ny\n' | $WIZ"
+check "review can abort"               "aborted; nothing was written" \
+  "printf '1\nn\nn\nn\na\n' | $WIZ"
+# A closed stdin used to spin the menu forever printing its retry message.
+check "end of input is not a loop"     "no more input" \
+  "printf '1\n' | $WIZ"
+check "wizard host still evaluates"    "disko" \
+  "printf '1\nn\nn\nn\ni\n' | $WIZ >/dev/null 2>&1; cd $FLAKE && nix eval --raw .#nixosConfigurations.wiztest.config.system.build.diskoScript"
+"$SSH" "sudo rm -rf $FLAKE/hosts/wiztest" >/dev/null 2>&1
+
 # --- the one that matters ------------------------------------------------
 BEFORE=$("$SSH" 'lsblk -no NAME /dev/vdb | tr "\n" " "' 2>/dev/null)
 check "cancelling reports nothing written" "nothing was written" \
-  "echo no | $KNEW --disk /dev/vdb"
+  "printf 'n\nn\nn\na\n' | $KNEW --disk /dev/vdb"
 AFTER=$("$SSH" 'sudo udevadm settle; lsblk -no NAME /dev/vdb | tr "\n" " "' 2>/dev/null)
 if [[ "$BEFORE" == "$AFTER" && -n "$BEFORE" ]]; then
   printf '  \033[32mPASS\033[0m  cancelling leaves the disk untouched\n'; pass=$((pass + 1))
@@ -94,6 +124,10 @@ else
   printf '  \033[31mFAIL\033[0m  cancelling leaves the disk untouched\n        before: %s\n        after:  %s\n' \
     "$BEFORE" "$AFTER"; fail=$((fail + 1))
 fi
+
+# Hosts the wizard checks created. Left behind, they would make the next run
+# take the already-declared path and quietly test nothing.
+"$SSH" "sudo rm -rf $FLAKE/hosts/wiztest $FLAKE/hosts/tmptest $FLAKE/hosts/tmpaccept" >/dev/null 2>&1
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [[ $fail -eq 0 ]]

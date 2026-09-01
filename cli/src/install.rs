@@ -12,6 +12,28 @@ use std::process::{Command, Stdio};
 
 use crate::net;
 
+/// Give generated files back to whoever owns the checkout.
+///
+/// The installer runs as root, so anything it writes into your repository is
+/// root-owned - you would need sudo to edit your own machine's config, and
+/// tools that rewrite the tree (rsync, git checkout) fail outright.
+fn chown_to_repo(repo: &Path, target: &Path) -> Result<(), String> {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(meta) = fs::metadata(repo) else { return Ok(()) };
+    let (uid, gid) = (meta.uid(), meta.gid());
+
+    let mut stack = vec![target.to_path_buf()];
+    while let Some(p) = stack.pop() {
+        let _ = std::os::unix::fs::chown(&p, Some(uid), Some(gid));
+        if p.is_dir() {
+            if let Ok(entries) = fs::read_dir(&p) {
+                stack.extend(entries.filter_map(|e| e.ok()).map(|e| e.path()));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Refuse anything smaller than this. Below it the install fails partway
 /// through, which is worse than refusing up front.
 const MIN_BYTES: u64 = 20 * 1024 * 1024 * 1024;
@@ -135,11 +157,19 @@ fn is_nvme_controller_alias(name: &str) -> bool {
 }
 
 
+/// Read one answer.
+///
+/// End of input is an error, not an empty answer. Every menu here loops until
+/// it gets something valid, so returning "" on EOF makes each of them spin
+/// forever printing its retry message - which is exactly what a closed stdin
+/// looks like to a piped test or an unattended run.
 fn prompt(question: &str) -> io::Result<String> {
     print!("{question}");
     io::stdout().flush()?;
     let mut line = String::new();
-    io::stdin().lock().read_line(&mut line)?;
+    if io::stdin().lock().read_line(&mut line)? == 0 {
+        return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "no more input"));
+    }
     Ok(line.trim().to_string())
 }
 
@@ -218,11 +248,14 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     if disks.is_empty() {
         return Err("no disks found".into());
     }
+    // select_disk consumes the list; the wizard still needs the others to
+    // offer as a /home target.
+    let disks_snapshot = disks.clone();
 
     // An existing host already declares its disks, so that is the target.
     let declared = if host.create { Vec::new() } else { host_disks(&opts.flake, &host.name)? };
 
-    let targets: Vec<Disk> = if declared.is_empty() {
+    let mut targets: Vec<Disk> = if declared.is_empty() {
         // No declaration yet - a new host, whose disk.nix is written from
         // this choice.
         let target = match &opts.disk {
@@ -279,6 +312,68 @@ pub fn run_install(opts: Options) -> Result<(), String> {
         }
     }
 
+    // A host with no declaration gets one now, from four questions - and it
+    // is written and reviewed before anything is erased, so the last thing
+    // seen before the point of no return is the actual layout.
+    if declared.is_empty() {
+        let Some(repo) = &checkout else {
+            return Err(format!(
+                "{} is not a local checkout, so a disk layout cannot be written into it.\n\
+                 Clone the flake first, then install from that path.",
+                opts.flake
+            ));
+        };
+        let layout = ask_layout(&disks_snapshot, &targets[0])?;
+        let host_dir = repo.join("hosts").join(&host.name);
+        // Whether this directory is ours to remove again if the review is
+        // abandoned. Leaving a half-written host behind is not harmless: the
+        // next run finds it already declared and skips the wizard entirely.
+        let ours = !host_dir.exists();
+        fs::create_dir_all(&host_dir).map_err(|e| e.to_string())?;
+        let path = host_dir.join("disk.nix");
+        fs::write(&path, render_disk_nix(&layout)?).map_err(|e| e.to_string())?;
+
+        // The rest of the host has to exist now too. disko's script is built
+        // from this host, so a directory holding only disk.nix cannot be
+        // formatted from - and a half-written host would break evaluation of
+        // every other machine in the flake.
+        if !host_dir.join("default.nix").exists() {
+            scaffold_host(&host_dir, &host.name)?;
+        }
+        placeholder_hardware(&host_dir)?;
+        chown_to_repo(repo, &host_dir)?;
+
+        // Staged only once the layout is accepted - the flake must not be
+        // left carrying a host nobody agreed to.
+        if let Err(e) = review_layout(&path, opts.assume_yes) {
+            if ours {
+                let _ = fs::remove_dir_all(&host_dir);
+            }
+            return Err(e);
+        }
+        if repo.join(".git").exists() {
+            git_add(repo, &host_dir)?;
+        }
+
+        // Every disk the layout touches, not just the one picked first.
+        let mut wanted = vec![layout.system.clone()];
+        wanted.extend(layout.home.clone());
+        for dev in &wanted {
+            if let Some(d) = disks_snapshot.iter().find(|d| &d.path == dev) {
+                if d.in_use && !opts.force {
+                    return Err(format!(
+                        "{} is mounted right now. Refusing to erase it.",
+                        d.path.display()
+                    ));
+                }
+            }
+        }
+        targets = wanted
+            .iter()
+            .filter_map(|dev| disks_snapshot.iter().find(|d| &d.path == dev).cloned())
+            .collect();
+    }
+
     // Everything above this line is read-only.
     confirm(&targets, opts.assume_yes)?;
 
@@ -294,7 +389,7 @@ pub fn run_install(opts: Options) -> Result<(), String> {
         let host_dir = repo.join("hosts").join(&host.name);
         let hardware = host_dir.join("hardware.nix");
 
-        if host.create {
+        if host.create && !host_dir.join("default.nix").exists() {
             println!("==> scaffolding hosts/{}", host.name);
             scaffold_host(&host_dir, &host.name)?;
         }
@@ -302,12 +397,14 @@ pub fn run_install(opts: Options) -> Result<(), String> {
         // A committed hardware.nix may have been tuned by hand; replacing it
         // silently on a reinstall is not ours to do. `kiwami doctor` reports
         // when it has drifted from what the machine actually reports.
-        if opts.regen_hardware || !hardware.exists() {
+        if opts.regen_hardware || host.create || !hardware.exists() {
             println!("==> detecting hardware");
             generate_hardware(&host_dir)?;
         } else {
             println!("==> keeping the committed hardware.nix (--regen-hardware to replace)");
         }
+
+        chown_to_repo(repo, &host_dir)?;
 
         // Only when the checkout is a git repo. A plain directory flake
         // copies everything, so there is nothing to stage.
@@ -522,7 +619,7 @@ fn validate_host_name(name: &str) -> Result<(), String> {
 /// the flake, which is exactly what this design removed.
 ///
 /// `--no-filesystems` omits the mounts, which come from
-/// modules/disk-layout.nix instead. Generated mounts are pinned by UUID and
+/// the host's disk.nix instead. Generated mounts are pinned by UUID and
 /// mkfs mints new ones on every reinstall, so the generated file would go
 /// stale and hang boot; without them it stays correct across reformats.
 fn generate_hardware(host_dir: &Path) -> Result<(), String> {
@@ -553,7 +650,7 @@ fn generate_hardware(host_dir: &Path) -> Result<(), String> {
 # Hardware facts for this machine, detected by `kiwami install`.
 #
 # Generated with --show-hardware-config --no-filesystems, so it carries no
-# UUIDs: the mounts live in modules/disk-layout.nix and survive a reformat.
+# UUIDs: the mounts are derived from disk.nix and survive a reformat.
 #
 # Do not edit by hand. `kiwami doctor` compares this against what the machine
 # currently reports; regenerate with `kiwami install --regen-hardware`, or:
@@ -581,10 +678,12 @@ fn scaffold_host(host_dir: &Path, name: &str) -> Result<(), String> {
 
 {{
   imports = [
+    # Detected at install time. Do not edit; `kiwami doctor` diffs it against
+    # what this machine currently reports.
     ./hardware.nix
-    # The two partitions `kiwami install` created. Drop this import if you
-    # ever repartition by hand.
-    ../../modules/disk-layout.nix
+    # The layout you chose. disko formats from it and fileSystems is derived
+    # from it, so the two cannot drift apart.
+    ./disk.nix
   ];
 
   networking.hostName = "{name}";
@@ -743,6 +842,315 @@ fn on_installer_media() -> bool {
         .unwrap_or(false);
 
     stamped || ephemeral_root
+}
+
+
+// --- disk layout wizard --------------------------------------------------
+
+pub struct Layout {
+    system: PathBuf,
+    home: Option<PathBuf>,
+    encrypt: bool,
+    hibernate: bool,
+}
+
+/// The four questions, and only these four. Each one is irreversible: every
+/// other knob - filesystem, swap file, zram - is a rebuild away, and a
+/// question you can answer later does not belong in an installer.
+fn ask_layout(all: &[Disk], system: &Disk) -> Result<Layout, String> {
+    let others: Vec<&Disk> = all.iter().filter(|d| d.path != system.path).collect();
+
+    let home = if others.is_empty() {
+        None
+    } else if prompt("\nPut /home on a separate disk? [y/N] ").map_err(|e| e.to_string())?.eq_ignore_ascii_case("y") {
+        println!();
+        for (i, d) in others.iter().enumerate() {
+            println!("  {}) {d}", i + 1);
+        }
+        loop {
+            let a = prompt(&format!("\nWhich disk for /home? [1-{}] ", others.len()))
+                .map_err(|e| e.to_string())?;
+            match a.parse::<usize>() {
+                Ok(n) if n >= 1 && n <= others.len() => break Some(others[n - 1].path.clone()),
+                _ => println!("Enter a number between 1 and {}.", others.len()),
+            }
+        }
+    } else {
+        None
+    };
+
+    // The one choice that cannot be added later without reinstalling.
+    let encrypt = prompt("\nEncrypt the disk? [y/N] ").map_err(|e| e.to_string())?.eq_ignore_ascii_case("y");
+
+    // Swap size only matters for hibernation. Without it, zram is better and
+    // is pure configuration - no partition, changeable whenever.
+    let hibernate = prompt(
+        "\nHibernate (suspend to disk)?\n\
+         Needs a swap partition the size of RAM, decided now.\n\
+         Without it you get zram, which is changeable later. [y/N] ",
+    )
+    .map_err(|e| e.to_string())?
+    .eq_ignore_ascii_case("y");
+
+    if encrypt && hibernate {
+        return Err("encryption plus hibernation needs the swap area inside the encrypted\n\
+                    volume (LVM in LUKS), which this does not generate yet - an unencrypted\n\
+                    swap partition would write your RAM to disk in the clear.\n\
+                    Pick one, or write disk.nix by hand."
+            .into());
+    }
+
+    Ok(Layout { system: system.path.clone(), home, encrypt, hibernate })
+}
+
+/// A name built from the drive's own model and serial, not from the order the
+/// kernel happened to find it in. /dev/sdb is a position in a queue: add a
+/// disk and it can mean a different drive tomorrow, which is not something to
+/// write into a file whose job is deciding what gets erased.
+fn stable_device(dev: &Path) -> Result<String, String> {
+    let dir = Path::new("/dev/disk/by-id");
+    let mut names: Vec<String> = fs::read_dir(dir)
+        .map_err(|e| format!("cannot read {}: {e}", dir.display()))?
+        .filter_map(|e| e.ok())
+        .filter(|e| fs::canonicalize(e.path()).ok().as_deref() == Some(dev))
+        .filter_map(|e| e.file_name().into_string().ok())
+        // Partition aliases point at slices, not at the whole disk.
+        .filter(|n| !n.contains("-part"))
+        .collect();
+
+    if names.is_empty() {
+        return Err(format!(
+            "{} has no /dev/disk/by-id entry, so there is no stable name to write.\n\
+             Kernel names like {} can point at a different drive after adding one.",
+            dev.display(),
+            dev.display()
+        ));
+    }
+
+    // Several aliases usually exist for one drive. Prefer the readable
+    // model_serial form over wwn- and raw hex nvme- ids, and the shorter of
+    // what remains - QEMU, for one, offers the same disk with a _1 suffix.
+    names.sort_by_key(|n| {
+        let opaque = n.starts_with("wwn-") || n.starts_with("nvme-nvme.");
+        (opaque, n.len(), n.clone())
+    });
+    Ok(format!("/dev/disk/by-id/{}", names[0]))
+}
+
+fn ram_gib() -> Result<u64, String> {
+    let meminfo = fs::read_to_string("/proc/meminfo").map_err(|e| e.to_string())?;
+    let kb: u64 = meminfo
+        .lines()
+        .find(|l| l.starts_with("MemTotal:"))
+        .and_then(|l| l.split_whitespace().nth(1))
+        .and_then(|n| n.parse().ok())
+        .ok_or("cannot read MemTotal")?;
+    // Round up: a swap area smaller than RAM cannot hold the hibernation image.
+    Ok(kb.div_ceil(1024 * 1024).max(1))
+}
+
+/// Indent a rendered block to sit correctly inside its parent. Generated Nix
+/// gets committed and read by people, so it has to look like it was written
+/// by one.
+fn indent(block: &str, spaces: usize) -> String {
+    let pad = " ".repeat(spaces);
+    block
+        .lines()
+        .enumerate()
+        .map(|(i, l)| if i == 0 || l.is_empty() { l.to_string() } else { format!("{pad}{l}") })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn filesystem(mountpoint: &str) -> String {
+    format!(
+        "{{\n  type = \"filesystem\";\n  format = \"ext4\";\n  mountpoint = \"{mountpoint}\";\n}}"
+    )
+}
+
+fn encrypted(name: &str, mountpoint: &str) -> String {
+    format!(
+        "{{\n  type = \"luks\";\n  name = \"{name}\";\n  settings.allowDiscards = true;\n  content = {};\n}}",
+        indent(&filesystem(mountpoint), 2)
+    )
+}
+
+fn render_disk_nix(l: &Layout) -> Result<String, String> {
+    let system = stable_device(&l.system)?;
+
+    let root_content = if l.encrypt {
+        encrypted("cryptroot", "/")
+    } else {
+        filesystem("/")
+    };
+
+    let swap = if l.hibernate {
+        format!(
+            r#"          swap = {{
+            size = "{}G";
+            content = {{
+              type = "swap";
+              # Hibernation resumes from here, so the kernel has to be told
+              # which device holds the image.
+              resumeDevice = true;
+            }};
+          }};
+"#,
+            ram_gib()?
+        )
+    } else {
+        String::new()
+    };
+
+    let home = match &l.home {
+        None => String::new(),
+        Some(dev) => {
+            let home_dev = stable_device(dev)?;
+            let content = if l.encrypt {
+                encrypted("crypthome", "/home")
+            } else {
+                filesystem("/home")
+            };
+            format!(
+                r#"
+    home = {{
+      type = "disk";
+      device = "{home_dev}";
+      content = {{
+        type = "gpt";
+        partitions.home = {{
+          size = "100%";
+          content = {};
+        }};
+      }};
+    }};
+"#,
+                indent(&content, 10)
+            )
+        }
+    };
+
+    let notes = if l.encrypt && l.home.is_some() {
+        "#\n# Two encrypted volumes means two passphrase prompts at every boot. A\n\
+         # keyfile on the decrypted root can unlock /home instead; that is not\n\
+         # generated yet.\n"
+    } else {
+        ""
+    };
+
+    let zram = if l.hibernate {
+        ""
+    } else {
+        "#\n# No swap partition: zram is used instead - compressed swap in RAM. It\n\
+         # costs no disk, and can be turned off or joined by a swapfile with a\n\
+         # rebuild, unlike this file.\n"
+    };
+
+    Ok(format!(
+        r#"# Disk layout for this machine, written by `kiwami install`.
+#
+# One declaration, two uses: disko formats from it, and fileSystems is derived
+# from the same tree - so what gets erased and what gets mounted cannot drift
+# apart.
+#
+# Devices are named by id, not /dev/sdX: kernel names follow the order disks
+# are found in, so adding a drive can silently repoint this at another one.
+{notes}{zram}#
+# Editing this after installing does not repartition anything. It describes a
+# disk that already exists.
+{{ ... }}:
+
+{{
+  disko.devices.disk = {{
+    system = {{
+      type = "disk";
+      device = "{system}";
+      content = {{
+        type = "gpt";
+        partitions = {{
+          ESP = {{
+            size = "1G";
+            type = "EF00";
+            content = {{
+              type = "filesystem";
+              format = "vfat";
+              mountpoint = "/boot";
+              mountOptions = [ "umask=0077" ];
+            }};
+          }};
+{swap}          root = {{
+            size = "100%";
+            content = {};
+          }};
+        }};
+      }};
+    }};
+{home}  }};
+}}
+"#,
+        indent(&root_content, 12)
+    ))
+}
+
+/// Show the generated layout and let it be edited before anything is erased.
+///
+/// This is what keeps the four questions from ever needing to become forty:
+/// LUKS variants, btrfs subvolumes, RAID and separate /var stay documented
+/// disko config that you edit, rather than menus that have to be designed,
+/// tested and trusted.
+fn review_layout(path: &Path, assume_yes: bool) -> Result<(), String> {
+    let shown = fs::read_to_string(path).map_err(|e| e.to_string())?;
+    println!("\nWrote {}:\n", path.display());
+    for line in shown.lines().filter(|l| !l.trim_start().starts_with('#')) {
+        println!("  {line}");
+    }
+
+    if assume_yes {
+        return Ok(());
+    }
+
+    loop {
+        let choice = prompt("\n[i] install with this   [e] edit first   [a] abort: ")
+            .map_err(|e| e.to_string())?;
+        match choice.as_str() {
+            "i" | "I" => return Ok(()),
+            "a" | "A" => return Err("aborted; nothing was written to any disk".into()),
+            "e" | "E" => {
+                let editor = std::env::var("EDITOR").unwrap_or_else(|_| "nano".into());
+                let status = Command::new(&editor)
+                    .arg(path)
+                    .status()
+                    .map_err(|e| format!("{editor}: {e}"))?;
+                if !status.success() {
+                    println!("    {editor} exited non-zero; file left as it was");
+                }
+                return review_layout(path, assume_yes);
+            }
+            _ => println!("Enter i, e or a."),
+        }
+    }
+}
+
+/// A hardware.nix that is enough to evaluate, and nothing more.
+///
+/// The real one is generated after mounting, but the flake has to evaluate
+/// *before* that: disko's script is built from this very host, so a directory
+/// containing only disk.nix cannot be formatted from. It also means an
+/// install abandoned midway leaves a host that still evaluates rather than
+/// breaking the whole flake.
+fn placeholder_hardware(host_dir: &Path) -> Result<(), String> {
+    let system = match std::env::consts::ARCH {
+        "aarch64" => "aarch64-linux",
+        "x86_64" => "x86_64-linux",
+        other => return Err(format!("unsupported architecture: {other}")),
+    };
+    fs::write(
+        host_dir.join("hardware.nix"),
+        format!(
+            "# Placeholder. `kiwami install` replaces this with detected hardware\n             # once the target is mounted; if you are reading it after a finished\n             # install, that step did not run.\n             {{ lib, ... }}:\n\n{{\n  nixpkgs.hostPlatform = lib.mkDefault \"{system}\";\n}}\n"
+        ),
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// Print the detected disks and exit. Used by tests and by anyone wondering

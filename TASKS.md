@@ -73,6 +73,13 @@ a generated manifest; widgets resolve by filename.
 scaffolding, git staging, disk detection, refusals, confirmation), `net`,
 `theme`, `doctor` (including hardware drift), `commands --json`.
 
+**Disk layout wizard** — four questions, all irreversible: system disk,
+separate `/home`, encryption, hibernation. Everything else is a rebuild away
+and so is not asked. The layout is written, shown, and offered for editing
+*before* anything is erased, which is what stops the four questions ever
+becoming forty — LUKS variants, btrfs subvolumes and RAID stay documented
+disko config you edit rather than menus to design and trust.
+
 **Disk layout** — declared per host in `disk.nix` and applied with disko, so
 the layout is stated once instead of once as `parted` calls in Rust and once
 as a `fileSystems` module agreeing only by comment. Devices are named by
@@ -93,7 +100,7 @@ guard within a minute, which no automated run could because they all pass
 --force.
 
 **Harness** — 3-minute unattended install, QMP/serial/SSH channels,
-snapshot/reset, installer matrix (24 checks), CI on x86_64 (evaluate, build,
+snapshot/reset, installer matrix (33 checks), CI on x86_64 (evaluate, build,
 boot test with screenshots).
 
 ---
@@ -108,29 +115,11 @@ boot test with screenshots).
 - [ ] Copy on select. Paste needs synthetic input and stays a flag, never a
       promise
 
-### Disk layout wizard  *(next; disko is in, the questions are not)*
-Four questions, all irreversible — everything else is a rebuild away and so
-does not belong in a prompt:
-
-- [ ] Which disk for the system
-- [ ] Separate disk for `/home`?
-- [ ] Encrypt? (passphrase asked twice; a typo here bricks the next boot)
-- [ ] Hibernation? — the only reason swap size matters. No → `zramSwap`, pure
-      config, changeable forever. Yes → a partition sized to RAM, decided now
-- [ ] Write `hosts/<name>/disk.nix` from the answers, resolving `by-id` paths
-      the installer already knows, then **show the file and offer `[e] edit
-      first`** before formatting. That escape hatch is what stops the wizard
-      ever needing to grow: LUKS variants, btrfs subvolumes and RAID stay
-      documented disko config rather than menus I have to design
-- [ ] Deliberately not asked: `/boot` location and ESP size (one right answer
-      — the ESP on the system disk, 1 GiB), swap location (the system disk)
-- [ ] Encryption + separate `/home` means two passphrase prompts per boot
-      unless the second unlocks from a keyfile on the decrypted root. Wire
-      that in rather than asking
-- [ ] LUKS breaks the headless harness — no SSH before the passphrase — so
-      the dev VM stays unencrypted and encryption needs a scripted serial run
-
 ### Custom ISO
+- [ ] Bake `kiwami` in so a person types `kiwami install`, not a `nix run`
+      incantation, and clone the flake into place — installing a *new* machine
+      needs a writable checkout to generate `hardware.nix` into, which a
+      `github:` reference can never be
 - [ ] `nixosConfigurations.installer` from `installation-cd-minimal.nix`, with
       `kiwami` baked in and flakes enabled
 - [ ] Autologin into the installer
@@ -186,6 +175,14 @@ variants · anything that assumes a user who will not write Nix
 - CI's boot test asserts the desktop comes up; it does not check that widgets
   render correctly
 - `vm/scripts/install.sh` is verified only against the aarch64 QEMU guest
+- Encryption plus hibernation is refused: the swap area would need to sit
+  inside the encrypted volume (LVM in LUKS), and an unencrypted swap
+  partition writes your RAM to disk in the clear. Generating that layout is
+  the fix; refusing is the honest interim
+- Encryption with a separate `/home` means two passphrase prompts per boot.
+  A keyfile on the decrypted root would fix it; the generated config says so
+- The LUKS path is rendered and evaluated but never *installed*: a passphrase
+  prompt at boot has no SSH behind it, so it needs a scripted serial run
 - `kiwami net`'s wifi path is unexercised: the VM has no wireless device, so
   only the online case, the offline refusal and the nmcli-missing branch are
   covered. Hidden SSIDs and WPA-Enterprise deliberately defer to `nmtui`
