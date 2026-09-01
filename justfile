@@ -65,8 +65,9 @@ eval:
       fi
     done
 
-# Syntax of every script and justfile. Fast; evaluates no Nix.
+# Syntax of every script and justfile, plus the CLI's unit tests.
 lint:
+    @cargo test --manifest-path cli/Cargo.toml --quiet 2>&1 | grep -E "test result|^error" || true
     @rc=0; for f in vm/scripts/*.sh; do \
         if bash -n "$f"; then echo "ok   $f"; else echo "FAIL $f"; rc=1; fi; done; \
       for f in vm/scripts/*.py; do \

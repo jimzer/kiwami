@@ -915,6 +915,20 @@ fn ask_layout(all: &[Disk], system: &Disk) -> Result<Layout, String> {
     Ok(Layout { system: system.path.clone(), home, encrypt, hibernate })
 }
 
+/// Aliases that identify a drive by number rather than by what it is.
+///
+/// Every drive has several by-id names and all of them are stable, so this is
+/// about legibility: `nvme-PM981_NVMe_Samsung_512GB__S3ZHNA0M640707` says what
+/// the disk is, `nvme-eui.335a48304d6407070025384100000001` does not.
+///
+/// The eui form is why this is a function. The rule used to list wwn- and
+/// nvme-nvme., which are the two shapes QEMU produces - real NVMe hardware
+/// emits nvme-eui., which slipped through and, being the shortest name on
+/// offer, won the tiebreak outright. Found on an XPS 13, not in the VM.
+fn opaque(name: &str) -> bool {
+    name.starts_with("wwn-") || name.starts_with("nvme-eui.") || name.starts_with("nvme-nvme.")
+}
+
 /// A name built from the drive's own model and serial, not from the order the
 /// kernel happened to find it in. /dev/sdb is a position in a queue: add a
 /// disk and it can mean a different drive tomorrow, which is not something to
@@ -939,13 +953,7 @@ fn stable_device(dev: &Path) -> Result<String, String> {
         ));
     }
 
-    // Several aliases usually exist for one drive. Prefer the readable
-    // model_serial form over wwn- and raw hex nvme- ids, and the shorter of
-    // what remains - QEMU, for one, offers the same disk with a _1 suffix.
-    names.sort_by_key(|n| {
-        let opaque = n.starts_with("wwn-") || n.starts_with("nvme-nvme.");
-        (opaque, n.len(), n.clone())
-    });
+    names.sort_by_key(|n| (opaque(n), n.len(), n.clone()));
     Ok(format!("/dev/disk/by-id/{}", names[0]))
 }
 
@@ -1314,3 +1322,47 @@ pub fn list_disks() -> Result<(), String> {
 
 #[allow(dead_code)]
 fn _unused(_: Stdio) {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The aliases a real Samsung PM981 in an XPS 13 9380 actually offers,
+    /// captured from the machine. QEMU never produced the eui form, so the
+    /// preference rule was wrong for a year of testing without anything
+    /// failing.
+    #[test]
+    fn prefers_the_readable_alias_on_real_nvme() {
+        let mut names = vec![
+            "nvme-eui.335a48304d6407070025384100000001".to_string(),
+            "nvme-PM981_NVMe_Samsung_512GB_______S3ZHNA0M640707".to_string(),
+            "nvme-PM981_NVMe_Samsung_512GB__S3ZHNA0M640707".to_string(),
+            "nvme-PM981_NVMe_Samsung_512GB_______S3ZHNA0M640707_1".to_string(),
+        ];
+        names.sort_by_key(|n| (opaque(n), n.len(), n.clone()));
+        assert_eq!(names[0], "nvme-PM981_NVMe_Samsung_512GB__S3ZHNA0M640707");
+    }
+
+    /// The T5 the installer booted from, same machine.
+    #[test]
+    fn prefers_the_readable_alias_on_usb() {
+        let mut names = vec![
+            "wwn-0x5002538e00000000".to_string(),
+            "usb-Samsung_Portable_SSD_T5_1234567FA273-0:0".to_string(),
+        ];
+        names.sort_by_key(|n| (opaque(n), n.len(), n.clone()));
+        assert_eq!(names[0], "usb-Samsung_Portable_SSD_T5_1234567FA273-0:0");
+    }
+
+    /// What the dev VM offers, so the case that did work keeps working.
+    #[test]
+    fn prefers_the_readable_alias_in_qemu() {
+        let mut names = vec![
+            "nvme-nvme.1b36-6b6977616d692d746573742d6e766d65-51454d55204e564d65204374726c-00000001".to_string(),
+            "nvme-QEMU_NVMe_Ctrl_kiwami-test-nvme".to_string(),
+            "nvme-QEMU_NVMe_Ctrl_kiwami-test-nvme_1".to_string(),
+        ];
+        names.sort_by_key(|n| (opaque(n), n.len(), n.clone()));
+        assert_eq!(names[0], "nvme-QEMU_NVMe_Ctrl_kiwami-test-nvme");
+    }
+}
