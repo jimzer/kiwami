@@ -106,6 +106,7 @@ just vm rebuild      # push + nixos-rebuild switch
 just vm screenshot x
 just vm doctor       # or: just vm ssh 'kiwami doctor'
 just vm install-test # installer matrix
+just vm practice     # installer ISO in a window, throwaway disk, by hand
 just check           # lint + evaluate every host and the boot test (~16s)
 ```
 

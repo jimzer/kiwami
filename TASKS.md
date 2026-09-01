@@ -87,6 +87,11 @@ scaffolded then yours). Mounts are shared in `modules/disk-layout.nix` and go
 by label, matching what `install.rs` writes. `nixosConfigurations` is a
 directory listing, so a new machine is a folder and nothing edits `flake.nix`.
 
+**Harness** — `just vm practice` boots the ISO in a window on a scratch disk
+for walking the installer by hand; it found the inverted installed-system
+guard within a minute, which no automated run could because they all pass
+--force.
+
 **Harness** — 3-minute unattended install, QMP/serial/SSH channels,
 snapshot/reset, installer matrix (24 checks), CI on x86_64 (evaluate, build,
 boot test with screenshots).
