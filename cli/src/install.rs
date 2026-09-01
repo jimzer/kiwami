@@ -736,6 +736,11 @@ fn scaffold_host(host_dir: &Path, name: &str) -> Result<(), String> {
   # bar, because everything was installed for a different account.
   kiwami.user = "{user}";
 
+  # Log the desktop user in with no password. Off deliberately: it suits a
+  # throwaway VM and not a laptop, where it means whoever opens the lid is
+  # you. Uncomment only if you know that is what you want.
+  # kiwami.autoLogin = true;
+
   boot.loader.systemd-boot.enable = true;
   # Without this systemd-boot never registers an NVRAM entry and the firmware
   # boots something else, or nothing.
@@ -1465,6 +1470,30 @@ fn copy_into(repo: &Path, dest: &Path, owner: &str) -> Result<(), String> {
 /// why the gap went unnoticed: every VM install came out corrected and the
 /// installer's silence never showed.
 fn fix_boot_order() -> Result<(), String> {
+    // Which partition is actually the ESP of the machine just installed. The
+    // label is not enough: a reinstall leaves the previous install's entry in
+    // NVRAM, also called "Linux Boot Manager", pointing at a partition that
+    // was destroyed minutes ago. Matching by name picked that one and put a
+    // dead entry first - seen on a second install onto the same disk.
+    let esp = Command::new("findmnt")
+        .args(["-no", "SOURCE", "/mnt/boot"])
+        .output()
+        .map_err(|e| format!("findmnt: {e}"))?;
+    let esp = String::from_utf8_lossy(&esp.stdout).trim().to_string();
+    if esp.is_empty() {
+        println!("    cannot tell which partition is the ESP; leaving the boot order alone");
+        return Ok(());
+    }
+    let uuid = Command::new("blkid")
+        .args(["-s", "PARTUUID", "-o", "value", &esp])
+        .output()
+        .map_err(|e| format!("blkid: {e}"))?;
+    let uuid = String::from_utf8_lossy(&uuid.stdout).trim().to_lowercase();
+    if uuid.is_empty() {
+        println!("    {esp} has no PARTUUID; leaving the boot order alone");
+        return Ok(());
+    }
+
     let out = Command::new("nixos-enter")
         .args(["--root", "/mnt", "--", "efibootmgr"])
         .output()
@@ -1475,16 +1504,15 @@ fn fix_boot_order() -> Result<(), String> {
     }
     let text = String::from_utf8_lossy(&out.stdout);
 
-    // Match the loader path rather than the label: the name is set by
-    // whoever installed it and is not ours to rely on.
+    // The entry whose device path carries this exact partition. Unambiguous,
+    // however many entries share a label.
     let ours = text.lines().find_map(|l| {
-        let is_systemd_boot = l.contains("systemd-boot") || l.contains("Linux Boot Manager");
-        (is_systemd_boot && l.starts_with("Boot"))
+        (l.starts_with("Boot") && l.to_lowercase().contains(&uuid))
             .then(|| l.split_whitespace().next().unwrap_or(""))
             .map(|id| id.trim_start_matches("Boot").trim_end_matches('*').to_string())
     });
     let Some(entry) = ours else {
-        println!("    no systemd-boot entry in NVRAM; nothing to reorder");
+        println!("    no NVRAM entry points at {esp}; leaving the boot order alone");
         return Ok(());
     };
 
@@ -1504,7 +1532,7 @@ fn fix_boot_order() -> Result<(), String> {
     new.extend(order.into_iter().filter(|e| e != &entry));
     let joined = new.join(",");
     run("nixos-enter", &["--root", "/mnt", "--", "efibootmgr", "-o", &joined, "-t", "1"])?;
-    println!("    boot order -> {joined}");
+    println!("    boot order -> {joined} (Boot{entry} is this machine's ESP)");
     Ok(())
 }
 

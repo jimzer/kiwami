@@ -68,6 +68,20 @@ in
       '';
     };
 
+    autoLogin = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Log the desktop user straight in, with no password.
+
+        Off by default. It is right for a throwaway VM that exists to be
+        driven by a harness, and wrong for a laptop: it means anyone who opens
+        the lid is you. Combined with an unencrypted disk it means the machine
+        has no access control at all, which is easy not to notice because
+        nothing about a working desktop looks wrong.
+      '';
+    };
+
     bar = {
       enable = mkOption {
         type = types.bool;

@@ -1,6 +1,12 @@
 # Hyprland session. Shared by the VM and (later) real hardware.
 { config, pkgs, lib, ... }:
 
+let
+  # One definition, used by the greeter and by the autologin path, so they
+  # cannot start the session two different ways.
+  session = "${pkgs.uwsm}/bin/uwsm start -F -- /run/current-system/sw/bin/Hyprland";
+in
+
 {
   programs.hyprland = {
     enable = true;
@@ -26,15 +32,26 @@
   # Launched through UWSM rather than the Hyprland binary (or start-hyprland),
   # so the session gets its systemd targets. This mirrors the Exec= line the
   # uwsm module writes into its own wayland-session desktop entry.
+  # Launched through UWSM rather than start-hyprland, so the session gets its
+  # systemd targets. This is the same Exec line nixpkgs' own
+  # hyprland-uwsm.desktop carries; Hyprland warns that it was not started via
+  # start-hyprland, which is expected on this path - start-hyprland does its
+  # own session setup and would fight UWSM for it.
   services.greetd = {
     enable = true;
-    settings.initial_session = {
-      command = "${pkgs.uwsm}/bin/uwsm start -F -- /run/current-system/sw/bin/Hyprland";
-      user = config.kiwami.user;
-    };
-    settings.default_session = {
-      command = "${pkgs.uwsm}/bin/uwsm start -F -- /run/current-system/sw/bin/Hyprland";
-      user = config.kiwami.user;
+    settings = {
+      # The greeter. Asks who you are, then starts the session as them.
+      default_session = {
+        command = "${pkgs.greetd.tuigreet}/bin/tuigreet --time --remember --cmd '${session}'";
+        user = "greeter";
+      };
+    }
+    # Only when explicitly asked for: see kiwami.autoLogin.
+    // lib.optionalAttrs config.kiwami.autoLogin {
+      initial_session = {
+        command = session;
+        user = config.kiwami.user;
+      };
     };
   };
 

@@ -124,6 +124,7 @@
                 home.stateVersion = "26.05";
               };
               users.users.nixos.initialPassword = "kiwami";
+              kiwami.autoLogin = true;
               virtualisation.memorySize = 4096;
               virtualisation.cores = 2;
               virtualisation.qemu.options = [ "-vga virtio" ];

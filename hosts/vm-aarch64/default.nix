@@ -19,6 +19,10 @@
     home.stateVersion = "26.05";
   };
 
+  # The harness drives this machine over ssh and serial; there is nobody to
+  # type a password at a greeter.
+  kiwami.autoLogin = true;
+
   networking.hostName = "kiwami-vm";
 
   boot.loader.systemd-boot.enable = true;
