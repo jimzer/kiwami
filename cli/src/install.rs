@@ -240,9 +240,18 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     // and it is the difference between "unknown host" and "unknown host,
     // reported after your disk was erased".
     println!("==> resolving {}", opts.flake);
-    let checkout = local_checkout(&opts.flake);
+    let mut flake = opts.flake.clone();
+    let mut checkout = local_checkout(&flake);
+
+    // A new machine has to be written down somewhere, and the program knows
+    // the URL - telling you to go and clone it yourself was busywork.
+    if opts.new_host && checkout.is_none() {
+        let dir = clone_flake(&flake, opts.assume_yes)?;
+        flake = dir.to_string_lossy().to_string();
+        checkout = Some(dir);
+    }
     let host = resolve_host(
-        &opts.flake,
+        &flake,
         opts.host.clone(),
         opts.assume_yes,
         opts.new_host,
@@ -262,7 +271,7 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     let disks_snapshot = disks.clone();
 
     // An existing host already declares its disks, so that is the target.
-    let declared = if host.create { Vec::new() } else { host_disks(&opts.flake, &host.name)? };
+    let declared = if host.create { Vec::new() } else { host_disks(&flake, &host.name)? };
 
     let mut targets: Vec<Disk> = if declared.is_empty() {
         // No declaration yet - a new host, whose disk.nix is written from
@@ -395,8 +404,8 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     // formats and mounts. The layout is not restated here, which is the point
     // - it used to live twice, as parted calls in this file and as a
     // fileSystems module, agreeing only by comment.
-    println!("\n==> partitioning and formatting from {}#{}", opts.flake, host.name);
-    run_disko(&opts.flake, &host.name)?;
+    println!("\n==> partitioning and formatting from {}#{}", flake, host.name);
+    run_disko(&flake, &host.name)?;
 
     // The key has to exist on the installed root, not just in the installer's
     // memory, or /home asks for a passphrase from the second boot onward.
@@ -439,9 +448,16 @@ pub fn run_install(opts: Options) -> Result<(), String> {
         ));
     }
 
-    println!("==> installing {} (this takes a while)", opts.flake);
-    let flake_ref = format!("{}#{}", opts.flake, host.name);
+    println!("==> installing {} (this takes a while)", flake);
+    let flake_ref = format!("{}#{}", flake, host.name);
     run("nixos-install", &["--flake", &flake_ref, "--no-root-passwd"])?;
+
+    // After nixos-install, so /mnt/home exists with the users the config
+    // declares.
+    if let Some(repo) = &checkout {
+        println!("==> placing the flake on the installed system");
+        place_checkout(repo, &flake, &host.name)?;
+    }
 
     println!("\n==> done. Reboot into the installed system.");
     Ok(())
@@ -1304,6 +1320,124 @@ fn install_keyfile() -> Result<(), String> {
     fs::copy(KEYFILE, &target).map_err(|e| e.to_string())?;
     use std::os::unix::fs::PermissionsExt;
     fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())
+}
+
+/// Turn a flake reference into something git can clone.
+///
+/// Only the shapes worth guessing at. Anything else returns None and the
+/// caller says what it needs rather than inventing a URL.
+fn clone_url(flake: &str) -> Option<String> {
+    if let Some(rest) = flake.strip_prefix("github:") {
+        let path = rest.split(['?', '#']).next()?;
+        let parts: Vec<&str> = path.split('/').collect();
+        // owner/repo, optionally owner/repo/ref - the ref is not part of the
+        // URL, and cloning the default branch is the sane reading.
+        if parts.len() >= 2 {
+            return Some(format!("https://github.com/{}/{}", parts[0], parts[1]));
+        }
+        None
+    } else if flake.starts_with("https://") || flake.starts_with("git+https://") {
+        Some(flake.trim_start_matches("git+").split(['?', '#']).next()?.to_string())
+    } else {
+        None
+    }
+}
+
+/// Clone a remote flake so there is somewhere to write this machine into.
+///
+/// A fetched flake lands read-only in the store, so a new host cannot be added
+/// to it. That was previously an error telling you to clone it yourself, which
+/// is a strange thing to be told by a program that knows the URL.
+fn clone_flake(flake: &str, assume_yes: bool) -> Result<PathBuf, String> {
+    let url = clone_url(flake).ok_or_else(|| {
+        format!("{flake} is not a local checkout and cannot be cloned automatically.\n\
+                 Clone it yourself, then install with --flake <path>.")
+    })?;
+
+    // Beside the invoking user's home when there is one, so it lands where a
+    // person would look for it.
+    let home = std::env::var("SUDO_USER")
+        .map(|u| PathBuf::from("/home").join(u))
+        .unwrap_or_else(|_| PathBuf::from("/root"));
+    let dest = home.join("kiwami");
+
+    if dest.join("flake.nix").exists() {
+        println!("    using the checkout already at {}", dest.display());
+        return Ok(dest);
+    }
+
+    if !assume_yes {
+        let answer = prompt(&format!(
+            "\nA new machine needs a writable checkout to record its hardware in.\n\
+             Clone {url}\n  into {}? [Y/n] ",
+            dest.display()
+        ))
+        .map_err(|e| e.to_string())?;
+        if !(answer.is_empty() || answer.eq_ignore_ascii_case("y")) {
+            return Err("no checkout to write into".into());
+        }
+    }
+
+    println!("==> cloning {url}");
+    fs::create_dir_all(&home).map_err(|e| e.to_string())?;
+    run("git", &["clone", "--depth", "1", &url, &dest.to_string_lossy()])?;
+    if let Ok(user) = std::env::var("SUDO_USER") {
+        let _ = run("chown", &["-R", &format!("{user}:users"), &dest.to_string_lossy()]);
+    }
+    Ok(dest)
+}
+
+/// The normal users a host declares, straight from its own configuration.
+fn target_users(flake: &str, host: &str) -> Vec<String> {
+    let out = Command::new("nix")
+        .args([
+            "--extra-experimental-features",
+            "nix-command flakes",
+            "eval",
+            "--json",
+            &format!("{flake}#nixosConfigurations.{host}.config.users.users"),
+            "--apply",
+            "us: builtins.filter (n: us.${n}.isNormalUser or false) (builtins.attrNames us)",
+        ])
+        .output();
+    match out {
+        Ok(o) if o.status.success() => serde_json::from_slice(&o.stdout).unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+/// Put the flake on the installed system.
+///
+/// Without this the machine boots - the configuration was baked into the
+/// closure at install time - and then cannot be changed: the checkout the
+/// installer generated hardware.nix and disk.nix into lived on the
+/// installer's tmpfs and vanished at reboot, taking the only description of
+/// this machine's hardware with it.
+fn place_checkout(repo: &Path, flake: &str, host: &str) -> Result<(), String> {
+    let users = target_users(flake, host);
+    if users.is_empty() {
+        println!("    no normal user declared; leaving the flake at /root/kiwami");
+        return copy_into(repo, Path::new("/mnt/root/kiwami"), "root");
+    }
+    for user in &users {
+        let dest = PathBuf::from("/mnt/home").join(user).join("kiwami");
+        copy_into(repo, &dest, user)?;
+        println!("    ~{user}/kiwami");
+    }
+    Ok(())
+}
+
+fn copy_into(repo: &Path, dest: &Path, owner: &str) -> Result<(), String> {
+    fs::create_dir_all(dest).map_err(|e| e.to_string())?;
+    // cp -a rather than a hand-rolled walk: .git has to come too, or the
+    // machine arrives with an untracked tree that no flake command will read.
+    run("cp", &["-a", &format!("{}/.", repo.display()), &dest.to_string_lossy()])?;
+
+    let inside = dest.to_string_lossy().replace("/mnt", "");
+    run(
+        "nixos-enter",
+        &["--root", "/mnt", "--", "chown", "-R", &format!("{owner}:users"), &inside],
+    )
 }
 
 /// Print the detected disks and exit. Used by tests and by anyone wondering

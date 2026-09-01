@@ -119,11 +119,10 @@ done
 $CONSOLE run 'grep -q "installation finished" /tmp/install.log' >/dev/null || {
   echo "install failed:"; $CONSOLE run 'tail -25 /tmp/install.log'; exit 1; }
 
-step "placing the repo in the user's home"
-# modules/home/hyprland.nix symlinks ~/.config/hypr into ~/kiwami/config, so
-# the repo must exist there on first boot or the link dangles.
-$CONSOLE run 'mkdir -p /mnt/home/nixos/kiwami && cp -r /tmp/kiwami/. /mnt/home/nixos/kiwami/ && nixos-enter --root /mnt -- chown -R nixos:users /home/nixos/kiwami' >/dev/null
-echo "    ~/kiwami placed"
+# The repo is placed on the installed system by `kiwami install` itself now.
+# It used to happen here, which meant the harness was quietly supplying
+# something a real install did not - the machine would boot and then have no
+# checkout to rebuild from, and the generated hardware.nix would be gone.
 
 step "seeding ssh key"
 [[ -f "$KEY" ]] || ssh-keygen -t ed25519 -N '' -C kiwami-vm -f "$KEY" >/dev/null
