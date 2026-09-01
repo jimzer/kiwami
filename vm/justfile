@@ -44,15 +44,19 @@ practice: fetch-iso
     @mkdir -p disks
     @test -f disks/practice.qcow2 || qemu-img create -f qcow2 disks/practice.qcow2 40G
     @cp -f "$(brew --prefix)/share/qemu/edk2-arm-vars.fd" disks/practice-vars.fd
-    @DISK=$PWD/disks/practice.qcow2 VARS=$PWD/disks/practice-vars.fd \
+    # The Kiwami image when it exists, otherwise the stock NixOS one. Practising
+    # against the stock ISO cannot exercise anything we ship - kiwami is not on
+    # it - so the whole point is lost unless the built image is used.
+    @test -f iso/kiwami-installer-aarch64.iso \
+      && echo "using the Kiwami image" || echo "no Kiwami image; falling back to the stock ISO (run: just vm build-iso)"
+    @ISO=$(test -f $PWD/iso/kiwami-installer-aarch64.iso && echo $PWD/iso/kiwami-installer-aarch64.iso || echo $PWD/iso/nixos-minimal-26.05-aarch64.iso) \
+      DISK=$PWD/disks/practice.qcow2 VARS=$PWD/disks/practice-vars.fd \
       QMP_SOCK=/tmp/kiwami-practice-qmp.sock SERIAL_SOCK=/tmp/kiwami-practice-serial.sock \
       SSH_PORT=2223 ./scripts/start-vm.sh install gui
-    @printf '\nA window is opening. Once it reaches a prompt:\n\n'
-    @printf '  sudo -i\n'
-    @printf "  nix --extra-experimental-features 'nix-command flakes' run \\\\\n"
-    @printf '    github:jimzer/kiwami#kiwami -- install\n\n'
-    @printf 'It will check the network, offer the hosts, show the disk it is\n'
-    @printf 'about to erase, and wait for you to type yes.\n'
+    @printf '\nA window is opening. The image carries kiwami, so at the prompt:\n\n'
+    @printf '  sudo kiwami remote      join a tailnet (opens a URL to approve elsewhere)\n'
+    @printf '  sudo kiwami net         get online\n'
+    @printf '  sudo kiwami install     walk the installer\n\n'
     @printf 'Start over any time with:  just vm practice-reset\n\n'
 
 # Throw away the practice disk so the next run starts from blank hardware
