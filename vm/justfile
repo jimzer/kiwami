@@ -26,6 +26,28 @@ install: fetch-iso
 start-test-disks:
     @TEST_DISKS=1 ./scripts/start-vm.sh run headless
 
+# Boot the installer ISO in a window, on a throwaway disk, to walk through
+# `kiwami install` by hand the way a person would. Leaves the dev VM's own
+# disk alone; only one VM runs at a time, so this stops the other.
+practice: fetch-iso
+    @mkdir -p disks
+    @test -f disks/practice.qcow2 || qemu-img create -f qcow2 disks/practice.qcow2 40G
+    @cp -f "$(brew --prefix)/share/qemu/edk2-arm-vars.fd" disks/practice-vars.fd
+    @DISK=$PWD/disks/practice.qcow2 VARS=$PWD/disks/practice-vars.fd \
+      QMP_SOCK=/tmp/kiwami-practice-qmp.sock SERIAL_SOCK=/tmp/kiwami-practice-serial.sock \
+      SSH_PORT=2223 ./scripts/start-vm.sh install gui
+    @printf '\nA window is opening. Once it reaches a prompt:\n\n'
+    @printf '  sudo -i\n'
+    @printf "  nix --extra-experimental-features 'nix-command flakes' run \\\\\n"
+    @printf '    github:jimzer/kiwami#kiwami -- install\n\n'
+    @printf 'It will check the network, offer the hosts, show the disk it is\n'
+    @printf 'about to erase, and wait for you to type yes.\n'
+    @printf 'Start over any time with:  just vm practice-reset\n\n'
+
+# Throw away the practice disk so the next run starts from blank hardware
+practice-reset:
+    @rm -f disks/practice.qcow2 disks/practice-vars.fd && echo "practice disk removed"
+
 # Run the installer test matrix (needs start-test-disks)
 install-test:
     @./scripts/install-test.sh

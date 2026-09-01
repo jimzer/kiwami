@@ -4,6 +4,9 @@
 #   ./run-vm.sh install        boot the ISO to install onto the disk
 #   ./run-vm.sh run            boot the installed disk
 #   ./run-vm.sh install gui    same, but with a cocoa window for human use
+#
+# DISK, VARS, QMP_SOCK, SERIAL_SOCK and SSH_PORT are all overridable, which is
+# how `just vm practice` runs a throwaway machine without touching this one.
 set -euo pipefail
 
 VM_DIR="$(cd "$(dirname "$0")/.." && pwd)"
@@ -11,7 +14,9 @@ QEMU_SHARE="$(brew --prefix)/share/qemu"
 
 ISO="${ISO:-$VM_DIR/iso/nixos-minimal-26.05-aarch64.iso}"
 DISK="${DISK:-$VM_DIR/disks/kiwami.qcow2}"
-VARS="$VM_DIR/disks/edk2-vars.fd"
+# Overridable so a practice run gets its own firmware variables. Sharing them
+# would let one VM's boot entries point at another VM's disk.
+VARS="${VARS:-$VM_DIR/disks/edk2-vars.fd}"
 QMP_SOCK="${QMP_SOCK:-/tmp/kiwami-qmp.sock}"
 SERIAL_LOG="$VM_DIR/serial.log"
 SERIAL_SOCK="${SERIAL_SOCK:-/tmp/kiwami-serial.sock}"
@@ -40,7 +45,8 @@ args=(
   # writes disko configs by stable id. With the shorthand the VM would be the
   # one machine that never exercises that path.
   -drive "file=$DISK,if=none,id=root0,format=qcow2,discard=unmap"
-  -device virtio-blk-pci,drive=root0,serial=kiwami-root
+  # The serial must match what hosts/*/disk.nix names by id.
+  -device virtio-blk-pci,drive=root0,serial="${ROOT_SERIAL:-kiwami-root}"
   -device virtio-gpu-pci
   # A sound card with no host output: the guest gets a real PipeWire sink so
   # the volume OSD is testable, without QEMU grabbing the Mac's audio.

@@ -171,9 +171,13 @@ pub struct Options {
 }
 
 pub fn run_install(opts: Options) -> Result<(), String> {
-    // A live ISO has no /etc/NIXOS; an installed system does. Without this,
-    // running `kiwami install` on your own machine out of curiosity wipes it.
-    if Path::new("/etc/NIXOS").exists() && !opts.force {
+    // Refuse to run on a machine that is already installed.
+    //
+    // This used to test for /etc/NIXOS, on the belief that only an installed
+    // system has it. The live ISO has it too, so the guard fired on the one
+    // place the installer is meant to run. Nothing caught it because the
+    // automated install passes --force.
+    if !on_installer_media() && !opts.force {
         return Err("this looks like an installed NixOS system, not the installer ISO.\n\
                     Refusing to continue. Pass --force if you really mean it."
             .into());
@@ -712,6 +716,33 @@ fn run_disko(flake: &str, host: &str) -> Result<(), String> {
         return Err("disko produced no script".into());
     }
     run(&script, &[])
+}
+
+/// Are we running from installer media?
+///
+/// NixOS stamps VARIANT_ID=installer into /etc/os-release on its installation
+/// images, which is the explicit signal. The root filesystem being a tmpfs or
+/// overlay is the corroborating one - installed systems boot from a real
+/// block device - and covers media that never set the variant.
+fn on_installer_media() -> bool {
+    let stamped = fs::read_to_string("/etc/os-release")
+        .map(|s| s.lines().any(|l| l.trim() == "VARIANT_ID=installer"))
+        .unwrap_or(false);
+
+    let ephemeral_root = fs::read_to_string("/proc/mounts")
+        .unwrap_or_default()
+        .lines()
+        .find_map(|l| {
+            let mut f = l.split_whitespace();
+            let src = f.next()?;
+            let target = f.next()?;
+            let fstype = f.next()?;
+            (target == "/").then(|| (src.to_string(), fstype.to_string()))
+        })
+        .map(|(_, fstype)| fstype == "tmpfs" || fstype == "overlay")
+        .unwrap_or(false);
+
+    stamped || ephemeral_root
 }
 
 /// Print the detected disks and exit. Used by tests and by anyone wondering
