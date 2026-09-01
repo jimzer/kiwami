@@ -511,7 +511,7 @@ fn mounted_devices() -> Vec<String> {
         .collect()
 }
 
-fn is_root() -> bool {
+pub fn is_root() -> bool {
     // No libc dependency for one number: the kernel reports it in /proc.
     fs::read_to_string("/proc/self/status")
         .ok()

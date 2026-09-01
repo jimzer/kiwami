@@ -16,6 +16,14 @@ use std::process::{Command, Stdio};
 use crate::net;
 
 pub fn run(down: bool) -> Result<(), String> {
+    // Everything below is privileged: starting the daemon, and tailscale up.
+    // Without this the systemctl call lands in a polkit password prompt for a
+    // password the installer user does not have, times out, and reports three
+    // failures all pointing at tailscaled - none of them the actual cause.
+    if !crate::install::is_root() {
+        return Err("must run as root (try: sudo kiwami remote)".into());
+    }
+
     if !have("tailscale") {
         return Err("tailscale is not installed here.\n\
                     It ships on the Kiwami installer image; on an installed \

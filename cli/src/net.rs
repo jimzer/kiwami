@@ -36,6 +36,13 @@ pub fn ensure(interactive: bool) -> Result<(), String> {
         return Ok(());
     }
 
+    // Connecting a device or joining a network is privileged, and finding
+    // that out from a polkit timeout several steps in is worse than being
+    // told now.
+    if !crate::install::is_root() {
+        return Err("no network, and fixing that needs root (try: sudo kiwami net)".into());
+    }
+
     if !have_nmcli() {
         return Err("no network, and NetworkManager is not available to set one up.\n\
                     Connect manually, then run this again."
