@@ -375,6 +375,28 @@ fn hardware_drift() -> Finding {
 
     let added: Vec<_> = b.iter().filter(|l| !a.contains(l)).cloned().collect();
     let gone: Vec<_> = a.iter().filter(|l| !b.contains(l)).cloned().collect();
+
+    // availableKernelModules is not an inventory of hardware. It is what the
+    // initrd carries in order to reach the root filesystem, and after that the
+    // kernel loads everything else on demand from modalias. So a committed
+    // list that is a superset of what is detected now is fine - detection
+    // reflects whatever happened to be attached, and the installer USB adds
+    // uas and sd_mod on every single install.
+    //
+    // The asymmetry is the point: extra modules cost a slightly larger initrd,
+    // missing ones can cost a machine that does not boot.
+    let only_superset = gone.is_empty()
+        && added.iter().all(|l| l.contains("availableKernelModules"))
+        && added.iter().all(|l| {
+            let fresh = list_items(l);
+            a.iter()
+                .filter(|c| c.contains("availableKernelModules"))
+                .any(|c| fresh.iter().all(|m| list_items(c).contains(m)))
+        });
+    if only_superset {
+        return Finding::new(Level::Ok, "hardware.nix covers this machine")
+            .detail("committed initrd modules are a superset of what is detected now");
+    }
     let mut detail = String::new();
     for l in gone.iter().take(4) {
         detail.push_str(&format!("- {l}\n"));
@@ -437,6 +459,17 @@ fn significant(nix: &str) -> Vec<String> {
         .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
         .map(|l| sort_list_literal(&l))
         .collect()
+}
+
+/// The quoted items inside a `[ "a" "b" ]` literal.
+fn list_items(line: &str) -> Vec<String> {
+    let (Some(open), Some(close)) = (line.find('['), line.rfind(']')) else {
+        return Vec::new();
+    };
+    if close < open {
+        return Vec::new();
+    }
+    line[open + 1..close].split_whitespace().map(str::to_string).collect()
 }
 
 /// Sort the elements of a `[ "a" "b" ]` literal, leaving everything else be.
