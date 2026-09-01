@@ -73,6 +73,13 @@ a generated manifest; widgets resolve by filename.
 scaffolding, git staging, disk detection, refusals, confirmation), `net`,
 `theme`, `doctor` (including hardware drift), `commands --json`.
 
+**Encrypted install** — `just vm luks-test` installs an encrypted machine on
+its own disk, reboots it, answers the initrd passphrase over the serial
+console (the only channel alive before networking), and checks what came up:
+root on a mapped device, cryptroot a LUKS volume, and swap *inside* the
+container — asked as a dependency question rather than by path, since a
+correct layout failed a name match.
+
 **Disk layouts** — all six combinations render, evaluate, and build their
 disko script: plain, encrypted, hibernating, encrypted *and* hibernating
 (LVM inside LUKS, so the hibernation image cannot land unencrypted), two
@@ -198,10 +205,6 @@ variants · anything that assumes a user who will not write Nix
 - CI's boot test asserts the desktop comes up; it does not check that widgets
   render correctly
 - `vm/scripts/install.sh` is verified only against the aarch64 QEMU guest
-- The LUKS layouts are rendered, evaluated, and their disko scripts built,
-  but none has been *installed*: a passphrase prompt at boot has no SSH
-  behind it, so it needs a scripted serial run. That is the one remaining
-  claim here resting on evaluation rather than on a booted machine
 - `kiwami remote` is written and ships on the image, but has never joined a
   tailnet — that needs an account and a browser, so it is untested end to end
 - `kiwami net`'s wifi path is unexercised: the VM has no wireless device, so
