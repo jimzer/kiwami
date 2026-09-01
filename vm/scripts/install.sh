@@ -5,16 +5,30 @@ set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 VM_DIR="$(cd "$DIR/.." && pwd)"
-DISK="$VM_DIR/disks/kiwami.qcow2"
+# Overridable so the LUKS test can install onto its own disk instead of
+# replacing the dev VM, which stays the machine everything else is driven from.
+DISK="${DISK:-$VM_DIR/disks/kiwami.qcow2}"
+VARS="${VARS:-$VM_DIR/disks/edk2-vars.fd}"
+export DISK VARS
 KEY="$VM_DIR/keys/kiwami_vm"
 CONSOLE="python3 $DIR/console.py"
 HOST="${HOST:-vm-aarch64}"
+# A command run on the installer before `kiwami install`. The encrypted host
+# takes its passphrase from a file, and this is where that file is written.
+PRE_INSTALL="${PRE_INSTALL:-}"
+# Sent to the console once after reboot. An encrypted root asks for its
+# passphrase in the initrd, before networking exists - the serial line is the
+# only channel alive that early, which is why this cannot be done over ssh.
+UNLOCK="${UNLOCK:-}"
+# Snapshotting is for the dev VM baseline; a throwaway test disk does not
+# need one.
+SNAPSHOT="${SNAPSHOT:-1}"
 
 step() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 
 step "resetting disk"
 "$DIR/stop-vm.sh" || true
-rm -f "$DISK" "$VM_DIR/disks/edk2-vars.fd"
+rm -f "$DISK" "$VARS"
 
 step "booting installer ISO"
 "$DIR/start-vm.sh" install headless
@@ -38,6 +52,11 @@ LOCAL_SUM=$(cd "$VM_DIR/.." && find flake.nix flake.lock hosts modules config sh
 REMOTE_SUM=$($CONSOLE run 'cd /tmp/kiwami && find flake.nix flake.lock hosts modules config shell cli/src -type f | sort | xargs cat | sha1sum | cut -d" " -f1' | tr -d '[:space:]')
 [[ "$LOCAL_SUM" == "$REMOTE_SUM" ]] || { echo "flake transfer corrupted ($LOCAL_SUM != $REMOTE_SUM)"; exit 1; }
 echo "    checksum ok"
+
+if [[ -n "$PRE_INSTALL" ]]; then
+  step "preparing the installer"
+  $CONSOLE run "$PRE_INSTALL" >/dev/null
+fi
 
 step "installing via kiwami install"
 # The installer under test is the one that ships. Previously this script
@@ -106,6 +125,24 @@ sleep 12
 "$DIR/stop-vm.sh" || true
 "$DIR/start-vm.sh" run headless
 
+if [[ -n "$UNLOCK" ]]; then
+  step "unlocking over serial"
+  # The prompt has to be waited for: sending early goes nowhere, and there is
+  # no ssh to fall back on until the root filesystem is open.
+  # systemd asks "Please enter passphrase for disk <label> (<name>):" - match
+  # the part that is stable, in the case it is actually printed. Guessing at
+  # "Passphrase for" cost a run that sat until the unlock timed out and the
+  # machine dropped to emergency mode with the prompt plainly on screen.
+  if TIMEOUT=180 $CONSOLE expect 'passphrase for' >/dev/null 2>&1; then
+    $CONSOLE send "$UNLOCK" >/dev/null
+    echo "    passphrase sent"
+  else
+    echo "!! no passphrase prompt appeared on the console; last output was:"
+    tail -c 1200 "$VM_DIR/serial.log" | tr '\r' '\n' | tail -8
+    exit 1
+  fi
+fi
+
 step "verifying"
 for _ in $(seq 1 30); do
   sleep 5
@@ -113,9 +150,11 @@ for _ in $(seq 1 30); do
     echo "    ssh ok: $("$DIR/vmssh" 'hostname; uname -m' 2>/dev/null | paste -sd' ' -)"
     # Snapshot the pristine system so `just vm reset` has a baseline.
     # qemu-img needs the image unlocked, so stop, snapshot, boot again.
-    "$DIR/stop-vm.sh" >/dev/null 2>&1 || true
-    "$DIR/snapshot.sh" save installed >/dev/null 2>&1 && echo "    snapshot 'installed' saved"
-    "$DIR/start-vm.sh" run headless >/dev/null
+    if [[ "$SNAPSHOT" == "1" ]]; then
+      "$DIR/stop-vm.sh" >/dev/null 2>&1 || true
+      "$DIR/snapshot.sh" save installed >/dev/null 2>&1 && echo "    snapshot 'installed' saved"
+      "$DIR/start-vm.sh" run headless >/dev/null
+    fi
     printf '\n\033[1;32m==> install complete\033[0m\n'
     exit 0
   fi

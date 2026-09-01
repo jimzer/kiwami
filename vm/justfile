@@ -71,6 +71,11 @@ start-iso-test:
     @TEST_DISKS=1 ISO=$PWD/iso/kiwami-installer-aarch64.iso VARS=$PWD/disks/iso-vars.fd \
       ./scripts/start-vm.sh install headless
 
+# Install an encrypted machine on its own disk and boot it. The only LUKS
+# claim evaluation cannot make: that it asks for a passphrase and comes up.
+luks-test: fetch-iso
+    ./scripts/luks-test.sh
+
 # Run the installer test matrix (needs start-test-disks)
 install-test:
     @./scripts/install-test.sh
