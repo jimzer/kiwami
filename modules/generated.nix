@@ -46,6 +46,12 @@ in
 {
   environment.etc = themeFiles // {
     "kiwami/bar.json".text = barManifest;
+
+    # The persist list, where the CLI can read it without evaluating Nix.
+    "kiwami/persist.json".text = builtins.toJSON {
+      directories = cfg.persist.directories;
+      files = cfg.persist.files;
+    };
     "kiwami/shell".source = ../shell;
 
     # Ours, a real Ghostty file rather than generated - same treatment as the

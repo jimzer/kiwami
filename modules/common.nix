@@ -16,6 +16,37 @@
   };
   security.sudo.wheelNeedsPassword = false;
 
+  # State this distro knows it needs. Everything here was learned the hard
+  # way or is a well-known trap:
+  #
+  #   ssh host keys      - regenerate and every client warns about a changed
+  #                        key, which is indistinguishable from an attack
+  #   /var/lib/nixos     - uid and gid allocation. Lose it and a rebuilt user
+  #                        can get a different uid than the files they own
+  #   /var/lib/systemd   - machine-id, which journald and much else key on
+  #   NetworkManager     - the wifi networks you have joined, and separately
+  #                        NM's own state: leases and seen-bssids. Declaring
+  #                        only the profiles leaves it half-remembering
+  #                        networks. Found by the doctor check, not by me
+  #   tailscale          - the node identity; losing it means a fresh browser
+  #                        login on a machine that may have no browser
+  #   /var/lib/kiwami    - the keyfile that opens a second encrypted disk
+  kiwami.persist.directories = [
+    "/var/lib/nixos"
+    "/var/lib/systemd"
+    "/var/lib/kiwami"
+    "/etc/NetworkManager/system-connections"
+    "/var/lib/NetworkManager"
+  ] ++ lib.optional config.services.tailscale.enable "/var/lib/tailscale";
+
+  kiwami.persist.files = [
+    "/etc/machine-id"
+    "/etc/ssh/ssh_host_ed25519_key"
+    "/etc/ssh/ssh_host_ed25519_key.pub"
+    "/etc/ssh/ssh_host_rsa_key"
+    "/etc/ssh/ssh_host_rsa_key.pub"
+  ];
+
   # NetworkManager, not scripted DHCP. `kiwami net` drives nmcli, so without
   # this the command ships on every machine and works on none of them - and a
   # laptop with no way to join a wireless network is not a laptop. The VM

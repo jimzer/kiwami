@@ -425,12 +425,96 @@ fn host_dir(repo: &std::path::Path, hostname: &str) -> Option<std::path::PathBuf
 
 /// Lines that carry meaning: no comments, no blank lines, whitespace
 /// collapsed so reindentation is not drift.
+///
+/// List elements are sorted too. The kernel enumerates modules in whatever
+/// order it found the devices, so two runs on an unchanged machine produce
+/// the same set in a different order - and a check that reports that as drift
+/// is a check people learn to ignore.
 fn significant(nix: &str) -> Vec<String> {
     nix.lines()
         .map(str::trim)
         .filter(|l| !l.is_empty() && !l.starts_with('#'))
         .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+        .map(|l| sort_list_literal(&l))
         .collect()
+}
+
+/// Sort the elements of a `[ "a" "b" ]` literal, leaving everything else be.
+fn sort_list_literal(line: &str) -> String {
+    let (Some(open), Some(close)) = (line.find('['), line.rfind(']')) else {
+        return line.to_string();
+    };
+    if close < open {
+        return line.to_string();
+    }
+    let inner = &line[open + 1..close];
+    let mut items: Vec<&str> = inner.split_whitespace().collect();
+    items.sort_unstable();
+    format!("{}[ {} ]{}", &line[..open], items.join(" "), &line[close + 1..])
+}
+
+/// What would be lost if the root filesystem were wiped.
+///
+/// Not a wipe, and nothing here changes anything: the point is to answer
+/// "what is accumulating that nothing declared" with a list rather than a
+/// worry. Nix guarantees cover /nix/store; /etc and /var are ordinary mutable
+/// directories that nothing garbage-collects, so a service removed from the
+/// config leaves its state behind forever and nothing ever mentions it.
+fn unpersisted_state() -> Finding {
+    let Ok(raw) = fs::read_to_string("/etc/kiwami/persist.json") else {
+        return Finding::new(Level::Skip, "no persist list generated");
+    };
+    let Ok(list) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return Finding::new(Level::Warn, "persist list is not valid JSON");
+    };
+    let declared: Vec<String> = ["directories", "files"]
+        .iter()
+        .filter_map(|k| list.get(*k))
+        .filter_map(|v| v.as_array())
+        .flatten()
+        .filter_map(|v| v.as_str().map(str::to_string))
+        .collect();
+
+    // /var/lib is where services keep state, so it is the honest place to
+    // look. /etc is mostly store symlinks; the unmanaged files there are a
+    // separate question and a noisier one.
+    let mut unlisted: Vec<String> = Vec::new();
+    if let Ok(entries) = fs::read_dir("/var/lib") {
+        for e in entries.filter_map(Result::ok) {
+            let path = e.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let p = path.to_string_lossy().to_string();
+            // A prefix match, so declaring /var/lib/systemd covers what is
+            // under it.
+            if !declared.iter().any(|d| p == *d || p.starts_with(&format!("{d}/"))) {
+                unlisted.push(p);
+            }
+        }
+    }
+    unlisted.sort();
+
+    if unlisted.is_empty() {
+        return Finding::new(Level::Ok, "all /var/lib state is declared");
+    }
+
+    let shown: Vec<String> = unlisted.iter().take(12).cloned().collect();
+    let more = unlisted.len().saturating_sub(shown.len());
+    let mut detail = shown.join("\n");
+    if more > 0 {
+        detail.push_str(&format!("\n... and {more} more"));
+    }
+
+    // Not a failure. Most of this is legitimately disposable - the point is
+    // that nobody has decided which, and an ephemeral root makes that
+    // decision for you whether you meant it or not.
+    Finding::new(
+        Level::Warn,
+        format!("{} directories in /var/lib are not declared", unlisted.len()),
+    )
+    .detail(detail)
+    .remedy("decide which matter and add them to kiwami.persist.directories")
 }
 
 // --- driver --------------------------------------------------------------
@@ -449,7 +533,7 @@ pub fn run() -> Result<(), ()> {
             shell_unit(),
             theme_applied(),
         ]),
-        ("hygiene", vec![generations(), lock_age(), hardware_drift()]),
+        ("hygiene", vec![generations(), lock_age(), hardware_drift(), unpersisted_state()]),
     ];
 
     let mut fails = 0;

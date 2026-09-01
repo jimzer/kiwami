@@ -68,6 +68,31 @@ in
       '';
     };
 
+    persist = {
+      directories = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        description = ''
+          Directories that must survive a wipe of the root filesystem.
+
+          Nothing reads this to wipe anything yet. It exists so the question
+          "what would I lose" has an answer that can be checked: `kiwami
+          doctor` compares it against the state actually on the machine and
+          reports what is not covered. The list gets built from evidence
+          rather than from guesswork, which matters because the entries people
+          forget are the ones nothing complains about until much later.
+        '';
+        example = [ "/var/lib/tailscale" "/var/lib/nixos" ];
+      };
+
+      files = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        description = "Individual files that must survive, e.g. host keys.";
+        example = [ "/etc/machine-id" ];
+      };
+    };
+
     autoLogin = mkOption {
       type = types.bool;
       default = false;
