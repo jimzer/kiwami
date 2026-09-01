@@ -2,6 +2,8 @@ mod commands;
 mod doctor;
 mod install;
 mod net;
+mod nix;
+mod remote;
 mod paths;
 mod theme;
 
@@ -47,6 +49,12 @@ enum Cmd {
     },
     /// List disks the installer can see, and exit
     Disks,
+    /// Join a tailnet so this machine can be reached during an install
+    Remote {
+        /// Disconnect instead of connecting
+        #[arg(long)]
+        down: bool,
+    },
     /// Get online: reports if already connected, otherwise offers wifi
     Net {
         /// Report what is visible and exit; change nothing
@@ -126,6 +134,12 @@ fn main() -> std::process::ExitCode {
         }
         Cmd::Doctor => {
             if doctor::run().is_err() {
+                return std::process::ExitCode::FAILURE;
+            }
+        }
+        Cmd::Remote { down } => {
+            if let Err(e) = remote::run(down) {
+                eprintln!("remote: {e}");
                 return std::process::ExitCode::FAILURE;
             }
         }

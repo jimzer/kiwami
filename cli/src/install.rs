@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::net;
+use crate::nix::{self, field, noted, raw, s, Field, Nix};
 
 /// Give generated files back to whoever owns the checkout.
 ///
@@ -33,6 +34,14 @@ fn chown_to_repo(repo: &Path, target: &Path) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Where the key that opens a second encrypted disk lives, on the already
+/// decrypted root.
+///
+/// Not under /etc: NixOS builds that from the store, and store paths are
+/// world-readable - a secret placed there is a secret published. /var/lib is
+/// plain mutable state, survives rebuilds, and stays mode 0600.
+const KEYFILE: &str = "/var/lib/kiwami/home.key";
 
 /// Refuse anything smaller than this. Below it the install fails partway
 /// through, which is worse than refusing up front.
@@ -345,6 +354,11 @@ pub fn run_install(opts: Options) -> Result<(), String> {
 
         // Staged only once the layout is accepted - the flake must not be
         // left carrying a host nobody agreed to.
+        // Before formatting: disko enrols this into the new volume's keyslot.
+        if layout.encrypt && layout.home.is_some() {
+            make_keyfile()?;
+        }
+
         if let Err(e) = review_layout(&path, opts.assume_yes) {
             if ours {
                 let _ = fs::remove_dir_all(&host_dir);
@@ -383,6 +397,12 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     // fileSystems module, agreeing only by comment.
     println!("\n==> partitioning and formatting from {}#{}", opts.flake, host.name);
     run_disko(&opts.flake, &host.name)?;
+
+    // The key has to exist on the installed root, not just in the installer's
+    // memory, or /home asks for a passphrase from the second boot onward.
+    if Path::new(KEYFILE).exists() {
+        install_keyfile()?;
+    }
 
     // Only now is /mnt populated, which is what nixos-generate-config reads.
     if let Some(repo) = &checkout {
@@ -892,14 +912,6 @@ fn ask_layout(all: &[Disk], system: &Disk) -> Result<Layout, String> {
     .map_err(|e| e.to_string())?
     .eq_ignore_ascii_case("y");
 
-    if encrypt && hibernate {
-        return Err("encryption plus hibernation needs the swap area inside the encrypted\n\
-                    volume (LVM in LUKS), which this does not generate yet - an unencrypted\n\
-                    swap partition would write your RAM to disk in the clear.\n\
-                    Pick one, or write disk.nix by hand."
-            .into());
-    }
-
     Ok(Layout { system: system.path.clone(), home, encrypt, hibernate })
 }
 
@@ -949,102 +961,227 @@ fn ram_gib() -> Result<u64, String> {
     Ok(kb.div_ceil(1024 * 1024).max(1))
 }
 
-/// Indent a rendered block to sit correctly inside its parent. Generated Nix
-/// gets committed and read by people, so it has to look like it was written
-/// by one.
-fn indent(block: &str, spaces: usize) -> String {
-    let pad = " ".repeat(spaces);
-    block
-        .lines()
-        .enumerate()
-        .map(|(i, l)| if i == 0 || l.is_empty() { l.to_string() } else { format!("{pad}{l}") })
-        .collect::<Vec<_>>()
-        .join("\n")
+/// The filesystem sitting at the bottom of whatever nesting there is.
+fn fs_content(mountpoint: &str) -> Nix {
+    nix::attrs(vec![
+        field("type", s("filesystem")),
+        field("format", s("ext4")),
+        field("mountpoint", s(mountpoint)),
+    ])
 }
 
-fn filesystem(mountpoint: &str) -> String {
-    format!(
-        "{{\n  type = \"filesystem\";\n  format = \"ext4\";\n  mountpoint = \"{mountpoint}\";\n}}"
-    )
+/// Where the hibernation image gets written, so it has to be inside the
+/// encrypted container when there is one - an unencrypted swap partition
+/// holds a verbatim copy of everything that was in RAM.
+fn swap_content() -> Nix {
+    nix::attrs(vec![
+        field("type", s("swap")),
+        noted(
+            "resumeDevice",
+            "Resuming reads the image back from here, so the kernel is told\nwhich device holds it.",
+            raw("true"),
+        ),
+    ])
 }
 
-fn encrypted(name: &str, mountpoint: &str) -> String {
-    format!(
-        "{{\n  type = \"luks\";\n  name = \"{name}\";\n  settings.allowDiscards = true;\n  content = {};\n}}",
-        indent(&filesystem(mountpoint), 2)
+fn luks(name: &str, inner: Nix, extra: Vec<Field>) -> Nix {
+    let mut fields = vec![
+        field("type", s("luks")),
+        field("name", s(name)),
+        field("settings.allowDiscards", raw("true")),
+    ];
+    fields.extend(extra);
+    fields.push(field("content", inner));
+    nix::attrs(fields)
+}
+
+fn gpt(partitions: Vec<Field>) -> Nix {
+    nix::attrs(vec![field("type", s("gpt")), field("partitions", nix::attrs(partitions))])
+}
+
+fn esp() -> Field {
+    field(
+        "ESP",
+        nix::attrs(vec![
+            field("size", s("1G")),
+            field("type", s("EF00")),
+            field(
+                "content",
+                nix::attrs(vec![
+                    field("type", s("filesystem")),
+                    field("format", s("vfat")),
+                    field("mountpoint", s("/boot")),
+                    field("mountOptions", Nix::List(vec![s("umask=0077")])),
+                ]),
+            ),
+        ]),
     )
 }
 
 fn render_disk_nix(l: &Layout) -> Result<String, String> {
     let system = stable_device(&l.system)?;
+    let mut devices: Vec<Field> = Vec::new();
+    let mut disks: Vec<Field> = Vec::new();
 
-    let root_content = if l.encrypt {
-        encrypted("cryptroot", "/")
-    } else {
-        filesystem("/")
-    };
-
-    let swap = if l.hibernate {
-        format!(
-            r#"          swap = {{
-            size = "{}G";
-            content = {{
-              type = "swap";
-              # Hibernation resumes from here, so the kernel has to be told
-              # which device holds the image.
-              resumeDevice = true;
-            }};
-          }};
-"#,
-            ram_gib()?
-        )
-    } else {
-        String::new()
-    };
-
-    let home = match &l.home {
-        None => String::new(),
-        Some(dev) => {
-            let home_dev = stable_device(dev)?;
-            let content = if l.encrypt {
-                encrypted("crypthome", "/home")
-            } else {
-                filesystem("/home")
-            };
-            format!(
-                r#"
-    home = {{
-      type = "disk";
-      device = "{home_dev}";
-      content = {{
-        type = "gpt";
-        partitions.home = {{
-          size = "100%";
-          content = {};
-        }};
-      }};
-    }};
-"#,
-                indent(&content, 10)
+    // Four shapes, from two independent choices. Composing values rather than
+    // text is what keeps this from being four hand-written templates that
+    // drift apart.
+    let (root_partitions, lvm) = match (l.encrypt, l.hibernate) {
+        // Everything inside one encrypted container, split by LVM. This is
+        // the only layout where hibernation and encryption coexist safely:
+        // swap is a logical volume inside the LUKS device, so the RAM image
+        // is encrypted by construction rather than by a second passphrase.
+        (true, true) => {
+            let vg = nix::attrs(vec![
+                field("type", s("lvm_vg")),
+                field(
+                    "lvs",
+                    nix::attrs(vec![
+                        field(
+                            "swap",
+                            nix::attrs(vec![
+                                field("size", s(&format!("{}G", ram_gib()?))),
+                                field("content", swap_content()),
+                            ]),
+                        ),
+                        field(
+                            "root",
+                            nix::attrs(vec![
+                                field("size", s("100%FREE")),
+                                field("content", fs_content("/")),
+                            ]),
+                        ),
+                    ]),
+                ),
+            ]);
+            let pv = nix::attrs(vec![field("type", s("lvm_pv")), field("vg", s("pool"))]);
+            (
+                vec![field(
+                    "root",
+                    nix::attrs(vec![
+                        field("size", s("100%")),
+                        field("content", luks("cryptroot", pv, vec![])),
+                    ]),
+                )],
+                Some(nix::attrs(vec![field("pool", vg)])),
             )
         }
+        (true, false) => (
+            vec![field(
+                "root",
+                nix::attrs(vec![
+                    field("size", s("100%")),
+                    field("content", luks("cryptroot", fs_content("/"), vec![])),
+                ]),
+            )],
+            None,
+        ),
+        (false, true) => (
+            vec![
+                field(
+                    "swap",
+                    nix::attrs(vec![
+                        field("size", s(&format!("{}G", ram_gib()?))),
+                        field("content", swap_content()),
+                    ]),
+                ),
+                field(
+                    "root",
+                    nix::attrs(vec![field("size", s("100%")), field("content", fs_content("/"))]),
+                ),
+            ],
+            None,
+        ),
+        (false, false) => (
+            vec![field(
+                "root",
+                nix::attrs(vec![field("size", s("100%")), field("content", fs_content("/"))]),
+            )],
+            None,
+        ),
     };
 
-    let notes = if l.encrypt && l.home.is_some() {
-        "#\n# Two encrypted volumes means two passphrase prompts at every boot. A\n\
-         # keyfile on the decrypted root can unlock /home instead; that is not\n\
-         # generated yet.\n"
-    } else {
-        ""
-    };
+    let mut system_partitions = vec![esp()];
+    system_partitions.extend(root_partitions);
+    disks.push(field(
+        "system",
+        nix::attrs(vec![
+            field("type", s("disk")),
+            field("device", s(&system)),
+            field("content", gpt(system_partitions)),
+        ]),
+    ));
 
-    let zram = if l.hibernate {
-        ""
-    } else {
-        "#\n# No swap partition: zram is used instead - compressed swap in RAM. It\n\
-         # costs no disk, and can be turned off or joined by a swapfile with a\n\
-         # rebuild, unlike this file.\n"
-    };
+    if let Some(dev) = &l.home {
+        let home_dev = stable_device(dev)?;
+        let inner = fs_content("/home");
+        let content = if l.encrypt {
+            // A second passphrase prompt every boot is the default outcome,
+            // and it is avoidable: root is already decrypted by the time this
+            // is unlocked, so a key stored inside it opens this one silently.
+            // The passphrase stays as a second keyslot, so losing the file is
+            // recoverable.
+            luks(
+                "crypthome",
+                inner,
+                vec![
+                    noted(
+                        "initrdUnlock",
+                        "Not needed to boot, so it is unlocked later - which is what\nmakes the key on the decrypted root reachable at all.",
+                        raw("false"),
+                    ),
+                    field("settings.keyFile", s(KEYFILE)),
+                    field("additionalKeyFiles", Nix::List(vec![s(KEYFILE)])),
+                ],
+            )
+        } else {
+            inner
+        };
+        disks.push(field(
+            "home",
+            nix::attrs(vec![
+                field("type", s("disk")),
+                field("device", s(&home_dev)),
+                field(
+                    "content",
+                    gpt(vec![field(
+                        "home",
+                        nix::attrs(vec![field("size", s("100%")), field("content", content)]),
+                    )]),
+                ),
+            ]),
+        ));
+    }
+
+    devices.push(field("disk", nix::attrs(disks)));
+    if let Some(vg) = lvm {
+        devices.push(field("lvm_vg", vg));
+    }
+
+    let body = nix::attrs(vec![field("disko.devices", nix::attrs(devices))]).render(0);
+
+    let mut notes = String::new();
+    if l.encrypt && l.home.is_some() {
+        notes.push_str(&format!(
+            "#\n# /home unlocks from {KEYFILE}, which lives on the encrypted root, so\n\
+             # there is one passphrase prompt rather than two. Create it before\n\
+             # installing, or the format step has nothing to enrol.\n"
+        ));
+    }
+    if l.encrypt && l.hibernate {
+        notes.push_str(
+            "#\n# Swap is a logical volume inside the LUKS container, not a partition\n\
+             # beside it: hibernation writes all of RAM there, and an unencrypted\n\
+             # swap area would undo the encryption for anything that was in memory.\n",
+        );
+    }
+    if !l.hibernate {
+        notes.push_str(
+            "#\n# No swap partition: zram is used instead - compressed swap in RAM. It\n\
+             # costs no disk, and can be turned off or joined by a swapfile with a\n\
+             # rebuild, unlike this file.\n",
+        );
+    }
 
     Ok(format!(
         r#"# Disk layout for this machine, written by `kiwami install`.
@@ -1055,40 +1192,13 @@ fn render_disk_nix(l: &Layout) -> Result<String, String> {
 #
 # Devices are named by id, not /dev/sdX: kernel names follow the order disks
 # are found in, so adding a drive can silently repoint this at another one.
-{notes}{zram}#
+{notes}#
 # Editing this after installing does not repartition anything. It describes a
 # disk that already exists.
 {{ ... }}:
 
-{{
-  disko.devices.disk = {{
-    system = {{
-      type = "disk";
-      device = "{system}";
-      content = {{
-        type = "gpt";
-        partitions = {{
-          ESP = {{
-            size = "1G";
-            type = "EF00";
-            content = {{
-              type = "filesystem";
-              format = "vfat";
-              mountpoint = "/boot";
-              mountOptions = [ "umask=0077" ];
-            }};
-          }};
-{swap}          root = {{
-            size = "100%";
-            content = {};
-          }};
-        }};
-      }};
-    }};
-{home}  }};
-}}
-"#,
-        indent(&root_content, 12)
+{body}
+"#
     ))
 }
 
@@ -1151,6 +1261,41 @@ fn placeholder_hardware(host_dir: &Path) -> Result<(), String> {
         ),
     )
     .map_err(|e| e.to_string())
+}
+
+/// Create the key that unlocks a second encrypted disk.
+///
+/// Written before disko runs, because disko enrols it into the new volume's
+/// keyslot while formatting - and copied onto the installed root afterwards,
+/// since that is where it has to be at every subsequent boot.
+fn make_keyfile() -> Result<(), String> {
+    let path = Path::new(KEYFILE);
+    if path.exists() {
+        return Ok(());
+    }
+    let dir = path.parent().ok_or("bad key path")?;
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+
+    // 64 bytes of kernel randomness, read exactly rather than slurped.
+    use std::io::Read;
+    let mut buf = [0u8; 64];
+    fs::File::open("/dev/urandom")
+        .and_then(|mut f| f.read_exact(&mut buf))
+        .map_err(|e| format!("cannot read /dev/urandom: {e}"))?;
+    fs::write(path, buf).map_err(|e| e.to_string())?;
+
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())
+}
+
+/// Put the key on the installed system, where every later boot needs it.
+fn install_keyfile() -> Result<(), String> {
+    let target = PathBuf::from("/mnt").join(KEYFILE.trim_start_matches('/'));
+    let dir = target.parent().ok_or("bad key path")?;
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    fs::copy(KEYFILE, &target).map_err(|e| e.to_string())?;
+    use std::os::unix::fs::PermissionsExt;
+    fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())
 }
 
 /// Print the detected disks and exit. Used by tests and by anyone wondering

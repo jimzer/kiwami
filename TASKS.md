@@ -73,6 +73,14 @@ a generated manifest; widgets resolve by filename.
 scaffolding, git staging, disk detection, refusals, confirmation), `net`,
 `theme`, `doctor` (including hardware drift), `commands --json`.
 
+**Disk layouts** — all six combinations render, evaluate, and build their
+disko script: plain, encrypted, hibernating, encrypted *and* hibernating
+(LVM inside LUKS, so the hibernation image cannot land unencrypted), two
+disks, and two disks encrypted (one passphrase, `/home` unlocking from a
+keyfile on the decrypted root). Emitted from a composed Nix value rather than
+formatted strings — the difficulty is the nesting, not the layout, and a
+printer gets braces and indentation right by construction.
+
 **Disk layout wizard** — four questions, all irreversible: system disk,
 separate `/home`, encryption, hibernation. Everything else is a rebuild away
 and so is not asked. The layout is written, shown, and offered for editing
@@ -126,7 +134,7 @@ get `nixosModules.default`, and an installer should not carry a desktop it
 never starts.
 
 **Harness** — 3-minute unattended install, QMP/serial/SSH channels,
-snapshot/reset, installer matrix (33 installed / 36 on live media), CI on x86_64 (evaluate, build,
+snapshot/reset, installer matrix (39 installed / 36 on live media), CI on x86_64 (evaluate, build,
 boot test with screenshots).
 
 ---
@@ -190,14 +198,12 @@ variants · anything that assumes a user who will not write Nix
 - CI's boot test asserts the desktop comes up; it does not check that widgets
   render correctly
 - `vm/scripts/install.sh` is verified only against the aarch64 QEMU guest
-- Encryption plus hibernation is refused: the swap area would need to sit
-  inside the encrypted volume (LVM in LUKS), and an unencrypted swap
-  partition writes your RAM to disk in the clear. Generating that layout is
-  the fix; refusing is the honest interim
-- Encryption with a separate `/home` means two passphrase prompts per boot.
-  A keyfile on the decrypted root would fix it; the generated config says so
-- The LUKS path is rendered and evaluated but never *installed*: a passphrase
-  prompt at boot has no SSH behind it, so it needs a scripted serial run
+- The LUKS layouts are rendered, evaluated, and their disko scripts built,
+  but none has been *installed*: a passphrase prompt at boot has no SSH
+  behind it, so it needs a scripted serial run. That is the one remaining
+  claim here resting on evaluation rather than on a booted machine
+- `kiwami remote` is written and ships on the image, but has never joined a
+  tailnet — that needs an account and a browser, so it is untested end to end
 - `kiwami net`'s wifi path is unexercised: the VM has no wireless device, so
   only the online case, the offline refusal and the nmcli-missing branch are
   covered. Hidden SSIDs and WPA-Enterprise deliberately defer to `nmtui`

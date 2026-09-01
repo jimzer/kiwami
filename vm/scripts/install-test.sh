@@ -123,7 +123,7 @@ WIZ="sudo timeout 90 kiwami install --force --flake $FLAKE --host wiztest --new"
 # A leftover hosts/wiztest would make the host already-declared, and every
 # check below would silently exercise the wrong path.
 "$SSH" "sudo rm -rf $FLAKE/hosts/wiztest" >/dev/null 2>&1
-check "wizard writes a disko layout"   "disko.devices.disk" \
+check "wizard writes a disko layout"   "disko.devices" \
   "printf '1\nn\nn\nn\na\n' | $WIZ"
 check "names disks by stable id"       "/dev/disk/by-id/" \
   "printf '1\nn\nn\nn\na\n' | $WIZ"
@@ -133,13 +133,45 @@ check "hibernation adds a sized swap"  "type = \"swap\"" \
   "printf '1\nn\nn\ny\na\n' | $WIZ"
 check "encryption wraps root in luks"  "type = \"luks\"" \
   "printf '1\nn\ny\nn\na\n' | $WIZ"
-check "refuses encrypt plus hibernate" "needs the swap area inside" \
-  "printf '1\nn\ny\ny\n' | $WIZ"
 check "review can abort"               "aborted; nothing was written" \
   "printf '1\nn\nn\nn\na\n' | $WIZ"
 # A closed stdin used to spin the menu forever printing its retry message.
 check "end of input is not a loop"     "no more input" \
   "printf '1\n' | $WIZ"
+# Every combination of the two independent choices, plus the two-disk cases.
+# Rendering is cheap; what matters is that disko accepts the result, so each
+# one is built rather than grepped. Nothing is formatted - the run stops at
+# the confirmation.
+layout() {          # layout <name> <answers> <expected-substring>
+  local name="$1" answers="$2" want="$3"
+  "$SSH" "sudo rm -rf $FLAKE/hosts/$name" >/dev/null 2>&1
+  local got
+  got=$("$SSH" "printf '$answers' | sudo timeout 120 kiwami install --force \
+          --flake $FLAKE --host $name --new 2>&1" 2>&1)
+  if ! grep -qF -- "$want" <<<"$got"; then
+    printf '  \033[31mFAIL\033[0m  layout %s renders\n        wanted: %s\n' "$name" "$want"
+    fail=$((fail + 1)); return
+  fi
+  if "$SSH" "cd $FLAKE && nix build .#nixosConfigurations.$name.config.system.build.diskoScript --no-link" >/dev/null 2>&1; then
+    printf '  \033[32mPASS\033[0m  layout %s builds\n' "$name"; pass=$((pass + 1))
+  else
+    printf '  \033[31mFAIL\033[0m  layout %s builds\n' "$name"; fail=$((fail + 1))
+  fi
+  "$SSH" "sudo rm -rf $FLAKE/hosts/$name" >/dev/null 2>&1
+}
+
+layout plain    '1\nn\nn\nn\ni\nno\n'      'mountpoint = "/"'
+layout enc      '1\nn\ny\nn\ni\nno\n'      'name = "cryptroot"'
+layout hib      '1\nn\nn\ny\ni\nno\n'      'resumeDevice = true'
+# The combination that used to be refused: swap is a logical volume inside the
+# LUKS container, so the hibernation image cannot land in the clear.
+layout enc-hib  '1\nn\ny\ny\ni\nno\n'      'type = "lvm_vg"'
+layout two      '1\ny\n1\nn\nn\ni\nno\n'  'mountpoint = "/home"'
+# One passphrase, not two: /home carries a keyslot holding a file on the
+# already-decrypted root.
+layout two-enc  '1\ny\n1\ny\nn\ni\nno\n'  'name = "crypthome"'
+layout two-enc-key '1\ny\n1\ny\nn\ni\nno\n' '/var/lib/kiwami/home.key'
+
 check "wizard host still evaluates"    "disko" \
   "printf '1\nn\nn\nn\ni\n' | $WIZ >/dev/null 2>&1; cd $FLAKE && nix eval --raw .#nixosConfigurations.wiztest.config.system.build.diskoScript"
 "$SSH" "sudo rm -rf $FLAKE/hosts/wiztest" >/dev/null 2>&1

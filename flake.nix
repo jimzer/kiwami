@@ -270,7 +270,20 @@
               # The whole point: `kiwami install`, not a nix run incantation.
               # git comes too - installing a new machine needs a writable
               # checkout to generate hardware.nix into.
-              environment.systemPackages = [ self.packages.${system}.kiwami pkgs.git ];
+              environment.systemPackages = [
+                self.packages.${system}.kiwami
+                pkgs.git
+                # `kiwami remote` drives this. Present but not started: joining
+                # a tailnet is an explicit act, not something live media should
+                # do on its own.
+                pkgs.tailscale
+              ];
+
+              systemd.services.tailscaled = {
+                description = "Tailscale, started on demand by `kiwami remote`";
+                wantedBy = lib.mkForce [ ];
+                serviceConfig.ExecStart = "${pkgs.tailscale}/bin/tailscaled";
+              };
 
               users.users.nixos.openssh.authorizedKeys.keys =
                 lib.optionals testKey harnessKey;
@@ -296,6 +309,7 @@
                 Kiwami installer.
 
                   sudo kiwami net                 get online, if you are not
+                  sudo kiwami remote              reachable over your tailnet, for help debugging
                   sudo kiwami install             reinstall a machine this flake already describes
 
                 For a new machine, which needs somewhere to write its detected
