@@ -17,7 +17,16 @@ pass=0; fail=0
 # Every run that gets past the root gate now resolves --host against a flake,
 # so the checks below point at the pushed tree (`just vm push`) rather than
 # GitHub: it keeps the matrix offline-clean and fast.
+# On the live image there is no checkout yet, so the run starts by making one
+# the way the login banner tells a person to - which tests that instruction
+# as a side effect.
+ON_ISO="${ON_ISO:-0}"
 FLAKE="/home/nixos/kiwami"
+if [[ "$ON_ISO" == "1" ]]; then
+  echo "cloning the flake into the live image"
+  "$SSH" "test -d $FLAKE || git clone -q https://github.com/jimzer/kiwami $FLAKE" || {
+    echo "clone failed"; exit 1; }
+fi
 K="sudo kiwami install --force --flake $FLAKE --host vm-aarch64"
 # Disk selection only happens for a host that does not declare its layout
 # yet. An existing host's disk.nix is the target, so the menu is skipped.
@@ -44,12 +53,34 @@ check "net reports NetworkManager"     "NetworkManager"  'kiwami net --status'
 # --- detection -----------------------------------------------------------
 check "lists the NVMe disk"            "/dev/nvme0n1"  'kiwami disks'
 check "hides the NVMe controller alias" ""             'kiwami disks | grep -c "nvme0c" | grep -q "^0$" && echo ""'
-check "flags the in-use disk"          "IN USE"        'kiwami disks'
+# Context-dependent: an installed system is running off one of these disks,
+# a live image is running off a tmpfs and a CD. Both facts are worth
+# asserting, but only one of them is true at a time.
+if [[ "$ON_ISO" == "1" ]]; then
+  check "no disk is in use on live media" "0" \
+    'kiwami disks | grep -c "IN USE" | tr -d "\n"'
+else
+  check "flags the in-use disk"          "IN USE"        'kiwami disks'
+fi
 check "counts existing partitions"     "existing partition" 'kiwami disks'
 
 # --- refusals, before anything is written --------------------------------
-check "refuses on an installed system" "not the installer ISO" \
-  'kiwami install --disk /dev/nvme0n1 --yes'
+# The same guard, from both sides. It used to test for /etc/NIXOS, which the
+# live ISO also has, so it refused to run on the one machine it exists for -
+# and the matrix only ever checked the installed side, where it was right by
+# accident.
+if [[ "$ON_ISO" == "1" ]]; then
+  # Reaching the network step at all proves the media guard let it through.
+  check "runs on installer media"      "checking network" \
+    'sudo kiwami install --disk /dev/nvme0n1 --yes'
+  check "kiwami is on PATH already"    "kiwami" 'command -v kiwami'
+  check "flakes are enabled"           "0" \
+    'nix eval --expr 1 >/dev/null 2>&1; echo $?'
+  check "the banner says what to run"  "kiwami install" 'cat /etc/issue'
+else
+  check "refuses on an installed system" "not the installer ISO" \
+    'kiwami install --disk /dev/nvme0n1 --yes'
+fi
 check "refuses without root"           "must run as root" \
   'kiwami install --force --disk /dev/nvme0n1 --yes'
 check "refuses a disk that is too small" "needs at least 20 GiB" \

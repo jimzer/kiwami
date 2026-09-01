@@ -21,6 +21,17 @@ fetch-iso:
 install: fetch-iso
     ./scripts/install.sh
 
+# Build the aarch64 installer image. This runs inside the guest: macOS cannot
+# build Linux derivations at all, so unlike every other step in this loop it
+# cannot happen on the host. Produces the -test variant, which carries the
+# harness key so `just vm install-test` can drive it.
+build-iso: push
+    @./scripts/vmssh 'nix build ~/kiwami#nixosConfigurations.installer-aarch64-test.config.system.build.isoImage --print-build-logs 2>&1 | tail -3'
+    @mkdir -p iso
+    @echo "copying image out (~1.5G)..."
+    @./scripts/vmssh 'cat ~/result/iso/*.iso' > iso/kiwami-installer-aarch64.iso
+    @ls -lh iso/kiwami-installer-aarch64.iso
+
 # Boot with the installer's scratch disks attached (empty NVMe, a partitioned
 # disk, and one too small) so `just vm install-test` has something to enumerate
 start-test-disks:
@@ -48,9 +59,25 @@ practice: fetch-iso
 practice-reset:
     @rm -f disks/practice.qcow2 disks/practice-vars.fd && echo "practice disk removed"
 
+# Boot the built Kiwami image with the scratch disks attached, so the matrix
+# runs against the media people actually boot rather than the stock NixOS ISO.
+#
+# Its own firmware variables: booting from CD rewrites the boot order, and
+# sharing the file leaves the installed system dropping into an EFI shell the
+# next time it starts.
+start-iso-test:
+    @test -f iso/kiwami-installer-aarch64.iso || { echo "no image; run: just vm build-iso"; exit 1; }
+    @cp -f "$(brew --prefix)/share/qemu/edk2-arm-vars.fd" disks/iso-vars.fd
+    @TEST_DISKS=1 ISO=$PWD/iso/kiwami-installer-aarch64.iso VARS=$PWD/disks/iso-vars.fd \
+      ./scripts/start-vm.sh install headless
+
 # Run the installer test matrix (needs start-test-disks)
 install-test:
     @./scripts/install-test.sh
+
+# Same matrix, against the live image (needs start-iso-test)
+install-test-iso:
+    @ON_ISO=1 ./scripts/install-test.sh
 
 # Boot the installed system (headless, detached)
 start:
@@ -86,7 +113,7 @@ status:
 # out-of-store symlinks into this tree, so deleting it makes them dangle. A
 # compositor or shell that reloads during that window reads a missing file.
 push:
-    @cd .. && COPYFILE_DISABLE=1 tar --no-xattrs --exclude='cli/target' -cf - flake.nix flake.lock hosts modules config shell cli \
+    @cd .. && COPYFILE_DISABLE=1 tar --no-xattrs --exclude='cli/target' -cf - flake.nix flake.lock hosts modules config shell cli vm/keys \
         | ./vm/scripts/vmssh 'rm -rf ~/.kiwami-staging && mkdir -p ~/.kiwami-staging ~/kiwami \
             && tar xf - -C ~/.kiwami-staging \
             && rsync -a --delete ~/.kiwami-staging/ ~/kiwami/ \

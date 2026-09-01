@@ -1,7 +1,11 @@
 vm/disks/
 vm/iso/
 vm/serial.log
-vm/keys/
+vm/keys/*
+# The harness public key is read by flake.nix for the -test installer image,
+# and flakes cannot see untracked files. Safe to commit: it is public, and it
+# only opens a throwaway VM whose password is "kiwami".
+!vm/keys/*.pub
 vm/screenshots/*.png
 vm/scripts/__pycache__/
 cli/target/

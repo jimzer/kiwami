@@ -95,8 +95,12 @@ by label, matching what `install.rs` writes. `nixosConfigurations` is a
 directory listing, so a new machine is a folder and nothing edits `flake.nix`.
 
 **Installer image** — `nixosConfigurations.installer-{x86_64,aarch64}` with
-kiwami, git, flakes and a banner saying what to run. Measured: **83s to build,
-1.5 GB**, on a two-core runner with zstd compression. Kept off the routine
+kiwami, git, flakes and a banner saying what to run; booted, and the matrix
+runs against it (36 checks) as well as against an installed system (33). The
+`-test` variant carries the harness key so the matrix drives real media
+instead of being rewritten for the serial console; the shipped image has no
+key. Measured: **83s to build, 1.5 GB**, on a two-core runner with zstd
+compression. Kept off the routine
 loop anyway — `just check` asserts the image's contents by evaluation in about
 a second, CI builds the installer *system* closure on every push, and the
 bootable `.iso` is a manual job. The image is not a `hosts/` entry: those all
@@ -109,8 +113,12 @@ guard within a minute, which no automated run could because they all pass
 --force.
 
 **Installer image** — `nixosConfigurations.installer-{x86_64,aarch64}` with
-kiwami, git, flakes and a banner saying what to run. Measured: **83s to build,
-1.5 GB**, on a two-core runner with zstd compression. Kept off the routine
+kiwami, git, flakes and a banner saying what to run; booted, and the matrix
+runs against it (36 checks) as well as against an installed system (33). The
+`-test` variant carries the harness key so the matrix drives real media
+instead of being rewritten for the serial console; the shipped image has no
+key. Measured: **83s to build, 1.5 GB**, on a two-core runner with zstd
+compression. Kept off the routine
 loop anyway — `just check` asserts the image's contents by evaluation in about
 a second, CI builds the installer *system* closure on every push, and the
 bootable `.iso` is a manual job. The image is not a `hosts/` entry: those all
@@ -118,7 +126,7 @@ get `nixosModules.default`, and an installer should not carry a desktop it
 never starts.
 
 **Harness** — 3-minute unattended install, QMP/serial/SSH channels,
-snapshot/reset, installer matrix (33 checks), CI on x86_64 (evaluate, build,
+snapshot/reset, installer matrix (33 installed / 36 on live media), CI on x86_64 (evaluate, build,
 boot test with screenshots).
 
 ---
@@ -133,12 +141,12 @@ boot test with screenshots).
 - [ ] Copy on select. Paste needs synthetic input and stays a flag, never a
       promise
 
-### Custom ISO  *(remaining: boot it)*
-- [ ] Boot the built image in QEMU and run the matrix against it, rather than
-      against the stock NixOS ISO
-- [ ] aarch64 image for the dev VM. The Mac cannot build Linux at all, so it
-      has to be built inside the VM or in CI, unlike everything else in the
-      loop
+### Installer image, remaining
+- [ ] `vm/scripts/install.sh` still pushes the source tree over serial as
+      base64 in 2500-char chunks — a trick that only existed because the stock
+      ISO had no kiwami. With the built image it becomes a `git clone`
+- [ ] The login banner hardcodes the clone URL; generate it from the flake
+      rather than letting a moved repo rot it silently
 
 ### Impermanence
 - [ ] **Phase 0, start now:** generate `/etc/kiwami/persist.json` from the

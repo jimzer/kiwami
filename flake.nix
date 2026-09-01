@@ -239,7 +239,26 @@
         # The installer image. Deliberately not a hosts/ entry: those all get
         # nixosModules.default, and an installer has no business carrying a
         # Hyprland desktop it will never start.
-        let mkInstaller = system:
+        let
+          # The harness key, present only in the -test images. A shipped
+          # installer must not carry a key from this repository; the test
+          # variant carries it so `vmssh` works and the whole installer matrix
+          # runs against the real image instead of being rewritten to drive a
+          # serial console.
+          # Missing is an error, not an empty list. A -test image whose entire
+          # purpose is carrying this key built happily without one, and the
+          # only symptom was ssh refusing a connection several minutes later.
+          harnessKey =
+            let f = ./vm/keys/kiwami_vm.pub;
+            in if builtins.pathExists f
+               then [ (builtins.readFile f) ]
+               else throw ''
+                 installer-*-test needs vm/keys/kiwami_vm.pub, which is not in
+                 this flake. Generate it with `just vm install`, and remember
+                 that flakes only see git-tracked files.
+               '';
+
+          mkInstaller = { system, testKey ? false }:
         nixpkgs.lib.nixosSystem {
           specialArgs = { inherit inputs; };
           modules = [
@@ -252,6 +271,9 @@
               # git comes too - installing a new machine needs a writable
               # checkout to generate hardware.nix into.
               environment.systemPackages = [ self.packages.${system}.kiwami pkgs.git ];
+
+              users.users.nixos.openssh.authorizedKeys.keys =
+                lib.optionals testKey harnessKey;
 
               # The installer shells out to `nix build` for the disko script,
               # and the stock ISO does not enable flakes.
@@ -288,8 +310,13 @@
         in
         nixpkgs.lib.genAttrs hostNames (name: mkHost [ (./hosts + "/${name}") ])
         // {
-          installer-x86_64 = mkInstaller "x86_64-linux";
-          installer-aarch64 = mkInstaller "aarch64-linux";
+          installer-x86_64 = mkInstaller { system = "x86_64-linux"; };
+          installer-aarch64 = mkInstaller { system = "aarch64-linux"; };
+
+          # Same image plus the harness key, so the installer matrix can be
+          # run against the media people actually boot.
+          installer-aarch64-test =
+            mkInstaller { system = "aarch64-linux"; testKey = true; };
         };
     };
 }
