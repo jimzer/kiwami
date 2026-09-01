@@ -129,22 +129,9 @@ step "seeding ssh key"
 PUB=$(cat "$KEY.pub")
 $CONSOLE run "mkdir -p /mnt/home/nixos/.ssh && echo '$PUB' > /mnt/home/nixos/.ssh/authorized_keys && chmod 700 /mnt/home/nixos/.ssh && chmod 600 /mnt/home/nixos/.ssh/authorized_keys && nixos-enter --root /mnt -- chown -R nixos:users /home/nixos/.ssh" >/dev/null
 
-step "fixing UEFI boot order"
-# systemd-boot appends its NVRAM entry LAST, behind UiApp and the EFI Shell,
-# so the firmware drops to a shell instead of booting. Move it to the front.
-# efibootmgr comes from the freshly installed system via nixos-enter, so this
-# needs no network and no channel on the ISO.
-EFI_OUT=$($CONSOLE run 'nixos-enter --root /mnt -- efibootmgr 2>/dev/null')
-ENTRY=$(echo "$EFI_OUT" | grep "Linux Boot Manager" | head -1 | sed 's/^Boot\([0-9A-Fa-f]*\).*/\1/' | tr -d '[:space:]')
-ORDER=$(echo "$EFI_OUT" | grep '^BootOrder' | head -1 | cut -d' ' -f2 | tr -d '[:space:]')
-if [[ -n "$ENTRY" && -n "$ORDER" ]]; then
-  NEW="$ENTRY,$(echo "$ORDER" | tr ',' '\n' | grep -v "^$ENTRY$" | paste -sd, -)"
-  $CONSOLE run "nixos-enter --root /mnt -- efibootmgr -o $NEW -t 1" >/dev/null
-  echo "    BootOrder -> $NEW"
-else
-  echo "    !! Linux Boot Manager entry not found; unattended boot may drop to the EFI shell"
-  echo "$EFI_OUT" | head -10
-fi
+# The boot order is corrected by `kiwami install` itself now. It used to
+# happen here, which is why the installer's silence went unnoticed: every VM
+# install came out with a working order and nothing ever pointed at the CLI.
 
 step "rebooting into installed system"
 $CONSOLE send 'poweroff' >/dev/null 2>&1 || true

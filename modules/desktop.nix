@@ -1,5 +1,5 @@
 # Hyprland session. Shared by the VM and (later) real hardware.
-{ pkgs, lib, ... }:
+{ config, pkgs, lib, ... }:
 
 {
   programs.hyprland = {
@@ -30,11 +30,11 @@
     enable = true;
     settings.initial_session = {
       command = "${pkgs.uwsm}/bin/uwsm start -F -- /run/current-system/sw/bin/Hyprland";
-      user = "nixos";
+      user = config.kiwami.user;
     };
     settings.default_session = {
       command = "${pkgs.uwsm}/bin/uwsm start -F -- /run/current-system/sw/bin/Hyprland";
-      user = "nixos";
+      user = config.kiwami.user;
     };
   };
 

@@ -452,6 +452,9 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     let flake_ref = format!("{}#{}", flake, host.name);
     run("nixos-install", &["--flake", &flake_ref, "--no-root-passwd"])?;
 
+    println!("==> setting the boot order");
+    fix_boot_order()?;
+
     // After nixos-install, so /mnt/home exists with the users the config
     // declares.
     if let Some(repo) = &checkout {
@@ -724,18 +727,21 @@ fn scaffold_host(host_dir: &Path, name: &str) -> Result<(), String> {
 
   networking.hostName = "{name}";
 
+  # The account the desktop belongs to. greetd logs this user in and its home
+  # carries the Hyprland and Quickshell config, so a mismatch here is quiet
+  # and total: the session comes up on Hyprland's own default config with no
+  # bar, because everything was installed for a different account.
+  kiwami.user = "{user}";
+
   boot.loader.systemd-boot.enable = true;
   # Without this systemd-boot never registers an NVRAM entry and the firmware
   # boots something else, or nothing.
   boot.loader.efi.canTouchEfiVariables = true;
 
-  # Replace with your own account. `kiwami install --no-root-passwd` leaves
-  # root locked, so set a password here or you cannot log in.
-  users.users.{user} = {{
-    isNormalUser = true;
-    extraGroups = [ "wheel" "networkmanager" "video" ];
-    initialPassword = "kiwami";
-  }};
+  # The account itself comes from modules/common.nix, which reads
+  # kiwami.user above. Only the password is set here - root is left locked by
+  # the install, so without this there is no way in.
+  users.users.{user}.initialPassword = "kiwami";
 
   home-manager.users.{user} = {{
     imports = [
@@ -1438,6 +1444,65 @@ fn copy_into(repo: &Path, dest: &Path, owner: &str) -> Result<(), String> {
         "nixos-enter",
         &["--root", "/mnt", "--", "chown", "-R", &format!("{owner}:users"), &inside],
     )
+}
+
+/// Put the new system first in the firmware's boot order.
+///
+/// The order lives in NVRAM, not on the disk, so wiping a drive leaves every
+/// old entry in place - a Windows entry pointing at files that no longer
+/// exist can still sit ahead of the one just created. systemd-boot appends
+/// itself at the end, so straight after an install the working entry is last.
+///
+/// Most firmware falls through to the next entry when one fails, so this is
+/// often invisible; edk2 in QEMU instead drops to an EFI shell, and there is
+/// no reason to find out which kind a given machine is while standing in
+/// front of it.
+///
+/// vm/scripts/install.sh has done this since the early days, which is exactly
+/// why the gap went unnoticed: every VM install came out corrected and the
+/// installer's silence never showed.
+fn fix_boot_order() -> Result<(), String> {
+    let out = Command::new("nixos-enter")
+        .args(["--root", "/mnt", "--", "efibootmgr"])
+        .output()
+        .map_err(|e| format!("efibootmgr: {e}"))?;
+    if !out.status.success() {
+        println!("    could not read the boot order; leaving it alone");
+        return Ok(());
+    }
+    let text = String::from_utf8_lossy(&out.stdout);
+
+    // Match the loader path rather than the label: the name is set by
+    // whoever installed it and is not ours to rely on.
+    let ours = text.lines().find_map(|l| {
+        let is_systemd_boot = l.contains("systemd-boot") || l.contains("Linux Boot Manager");
+        (is_systemd_boot && l.starts_with("Boot"))
+            .then(|| l.split_whitespace().next().unwrap_or(""))
+            .map(|id| id.trim_start_matches("Boot").trim_end_matches('*').to_string())
+    });
+    let Some(entry) = ours else {
+        println!("    no systemd-boot entry in NVRAM; nothing to reorder");
+        return Ok(());
+    };
+
+    let order: Vec<String> = text
+        .lines()
+        .find(|l| l.starts_with("BootOrder:"))
+        .and_then(|l| l.split(':').nth(1))
+        .map(|v| v.trim().split(',').map(|s| s.trim().to_string()).collect())
+        .unwrap_or_default();
+
+    if order.first().map(String::as_str) == Some(entry.as_str()) {
+        println!("    already first in the boot order");
+        return Ok(());
+    }
+
+    let mut new = vec![entry.clone()];
+    new.extend(order.into_iter().filter(|e| e != &entry));
+    let joined = new.join(",");
+    run("nixos-enter", &["--root", "/mnt", "--", "efibootmgr", "-o", &joined, "-t", "1"])?;
+    println!("    boot order -> {joined}");
+    Ok(())
 }
 
 /// Print the detected disks and exit. Used by tests and by anyone wondering
