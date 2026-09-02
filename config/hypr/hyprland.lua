@@ -65,7 +65,9 @@ hl.bind("XF86AudioMute", hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SINK@ to
 -- neither inotify nor udev - both were measured returning nothing - so the OSD
 -- has no way to notice a backlight write on its own. The marker lives on a
 -- tmpfs, where inotify does work.
-local brightness = "brightnessctl set %s && touch \"$XDG_RUNTIME_DIR/kiwami-brightness\""
+-- Writes a changing value, not touch: FileView compares content, and touching
+-- an empty file leaves the content identical, so nothing looked changed.
+local brightness = "brightnessctl set %s && date +%%s%%N > \"$XDG_RUNTIME_DIR/kiwami-brightness\""
 hl.bind("XF86MonBrightnessUp",
   hl.dsp.exec_cmd("sh -c '" .. string.format(brightness, "+5%%") .. "'"), { repeating = true })
 hl.bind("XF86MonBrightnessDown",
