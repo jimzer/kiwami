@@ -330,13 +330,31 @@
                 ++ lib.optional (system == "aarch64-linux") "console=ttyAMA0,115200"
                 ++ lib.optional (system == "x86_64-linux") "console=ttyS0,115200";
 
+              # Start the installer on login, on the first console only.
+              #
+              # An image whose purpose is installing should not require
+              # remembering three commands in the right order. But it must be
+              # escapable: the marker means quitting drops you to a shell and
+              # a second login stays a shell, so a wrong turn is not a reboot.
+              # Other TTYs are left alone entirely.
+              programs.bash.loginShellInit = ''
+                if [ "$(tty)" = "/dev/tty1" ] && [ ! -e /tmp/.kiwami-installer-started ]; then
+                  touch /tmp/.kiwami-installer-started
+                  sudo kiwami install --guided || true
+                  echo
+                  echo "Installer exited. You are at a shell; run it again with:"
+                  echo "  sudo kiwami install --guided"
+                fi
+              '';
+
               services.getty.helpLine = lib.mkForce ''
 
-                Kiwami installer.
+                Kiwami installer. It starts on its own; these are for when
+                you have left it, or are on another console.
 
-                  sudo kiwami net                 get online, if you are not
-                  sudo kiwami remote              reachable over your tailnet, for help debugging
-                  sudo kiwami install             reinstall a machine this flake already describes
+                  sudo kiwami install --guided    the whole thing: network, remote, install
+                  sudo kiwami net                 just get online
+                  sudo kiwami remote              just be reachable over your tailnet
 
                 For a new machine, which needs somewhere to write its detected
                 hardware:

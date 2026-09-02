@@ -207,6 +207,9 @@ pub struct Options {
     pub new_host: bool,
     /// Rewrite hardware.nix even if one is already committed.
     pub regen_hardware: bool,
+    /// Offer the steps that come before an install - networking, and being
+    /// reachable for help - rather than assuming they were done already.
+    pub guided: bool,
 }
 
 pub fn run_install(opts: Options) -> Result<(), String> {
@@ -232,8 +235,26 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     // The install downloads its whole closure from the binary cache, so this
     // has to pass before anything else. `--yes` implies unattended, and an
     // unattended run must not sit on a wifi password prompt.
+    if opts.guided {
+        println!("\nKiwami installer\n");
+    }
+
     println!("==> checking network");
     net::ensure(!opts.assume_yes)?;
+
+    // Offered here rather than left as something to remember: an install is
+    // exactly when a second pair of eyes is useful, and afterwards the machine
+    // has rebooted and the offer is gone.
+    if opts.guided && !opts.assume_yes {
+        let answer = prompt(
+            "\nMake this machine reachable over your tailnet, so someone can help?\n\
+             It opens a URL to approve from a browser elsewhere. [y/N] ",
+        )
+        .map_err(|e| e.to_string())?;
+        if answer.eq_ignore_ascii_case("y") {
+            crate::remote::run(false)?;
+        }
+    }
 
     // Resolve the host now, while the disk is still intact. This costs one
     // cheap eval - `builtins.attrNames` does not force the configurations -

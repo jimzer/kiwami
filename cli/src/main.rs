@@ -47,6 +47,10 @@ enum Cmd {
         /// Re-detect hardware even if hardware.nix is already committed
         #[arg(long)]
         regen_hardware: bool,
+        /// Walk through networking and remote access first. What the
+        /// installer image starts on boot.
+        #[arg(long)]
+        guided: bool,
     },
     /// List disks the installer can see, and exit
     Disks,
@@ -123,7 +127,7 @@ fn main() -> std::process::ExitCode {
                 }
             },
         },
-        Cmd::Install { disk, host, flake, yes, force, new, regen_hardware } => {
+        Cmd::Install { disk, host, flake, yes, force, new, regen_hardware, guided } => {
             let opts = install::Options {
                 disk,
                 host,
@@ -132,6 +136,7 @@ fn main() -> std::process::ExitCode {
                 force,
                 new_host: new,
                 regen_hardware,
+                guided,
             };
             if let Err(e) = install::run_install(opts) {
                 eprintln!("\ninstall: {e}");
