@@ -264,20 +264,26 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     let mut flake = opts.flake.clone();
     let mut checkout = local_checkout(&flake);
 
-    // A new machine has to be written down somewhere, and the program knows
-    // the URL - telling you to go and clone it yourself was busywork.
-    if opts.new_host && checkout.is_none() {
-        let dir = clone_flake(&flake, opts.assume_yes)?;
-        flake = dir.to_string_lossy().to_string();
-        checkout = Some(dir);
-    }
+    // Whether a new machine is possible, not whether it is possible yet. The
+    // clone happens after the choice is made - asking first, then refusing
+    // because nothing had been cloned, made the menu offer something it then
+    // would not do.
+    let can_write = checkout.is_some() || clone_url(&flake).is_some();
     let host = resolve_host(
         &flake,
         opts.host.clone(),
         opts.assume_yes,
         opts.new_host,
-        checkout.is_some(),
+        can_write,
     )?;
+
+    // Now that a new machine has actually been chosen, give it somewhere to
+    // be written down.
+    if host.create && checkout.is_none() {
+        let dir = clone_flake(&flake, opts.assume_yes)?;
+        flake = dir.to_string_lossy().to_string();
+        checkout = Some(dir);
+    }
     println!("    host: {}", host.name);
     if host.create {
         println!("    will scaffold hosts/{}", host.name);
@@ -668,7 +674,8 @@ fn resolve_host(
         if answer.eq_ignore_ascii_case("n") {
             if !writable {
                 return Err("a new machine needs somewhere to write its hardware, and this\n\
-                            flake is read-only. Install from a local checkout."
+                            flake can neither be written to nor cloned. Install from a\n\
+                            local checkout."
                     .into());
             }
             loop {

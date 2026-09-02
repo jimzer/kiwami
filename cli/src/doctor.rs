@@ -807,9 +807,6 @@ fn collect_ephemeral_loss(declared: &[String], out: &mut Vec<String>) {
 /// if the initrd rollback does not run, nothing is wiped, everything
 /// persists, and the machine behaves perfectly well while quietly
 /// accumulating exactly the state it was set up to discard.
-///
-
-
 /// Everything on the root that will not survive the next boot.
 ///
 
