@@ -798,20 +798,6 @@ fn collect_ephemeral_loss(declared: &[String], out: &mut Vec<String>) {
     }
 }
 
-/// Whether a stored hash is still the installer's default.
-/// Whether somebody has run `passwd` on a machine where it does nothing.
-/// Whether the root was actually wiped this boot.
-///
-/// Only meaningful on a machine with an ephemeral root, and the reason it
-/// exists is that the failure is silent in the direction that looks healthy:
-/// if the initrd rollback does not run, nothing is wiped, everything
-/// persists, and the machine behaves perfectly well while quietly
-/// accumulating exactly the state it was set up to discard.
-/// Everything on the root that will not survive the next boot.
-///
-
-
-
 /// What would be lost if the root filesystem were wiped.
 ///
 /// Not a wipe, and nothing here changes anything: the point is to answer

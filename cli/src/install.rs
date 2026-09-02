@@ -1001,15 +1001,15 @@ fn ask_layout(all: &[Disk], system: &Disk) -> Result<Layout, String> {
     // The one choice that cannot be added later without reinstalling.
     let encrypt = prompt("\nEncrypt the disk? [y/N] ").map_err(|e| e.to_string())?.eq_ignore_ascii_case("y");
 
-    // Swap size only matters for hibernation. Without it, zram is better and
-    // is pure configuration - no partition, changeable whenever.
-    let hibernate = prompt(
-        "\nHibernate (suspend to disk)?\n\
-         Needs a swap partition the size of RAM, decided now.\n\
-         Without it you get zram, which is changeable later. [y/N] ",
-    )
-    .map_err(|e| e.to_string())?
-    .eq_ignore_ascii_case("y");
+    // Hibernation is not asked about, because there is no answer to give. It
+    // needs a swap area, and with an ephemeral root that area would have to
+    // live inside the same btrfs the root is rolled back in - which is not
+    // generated yet. Asking, and then refusing the answer, threw a person out
+    // of the installer for picking the option that was offered.
+    //
+    // So swap is zram: compressed swap in RAM, no partition, and changeable
+    // with a rebuild if hibernation ever arrives.
+    let hibernate = false;
 
     // Not asked. Every machine this installs is ephemeral: the root is wiped
     // at each boot and only what the config declares survives. Offering the
@@ -1018,13 +1018,6 @@ fn ask_layout(all: &[Disk], system: &Disk) -> Result<Layout, String> {
     // is exactly what was found the first time the installer wrote persisted
     // state onto a root that was about to be discarded.
     let ephemeral = true;
-
-    if hibernate {
-        return Err("hibernation is not generated yet: the swap area would have to live\n\
-                    inside the same btrfs the root is rolled back in, which has not been\n\
-                    tested. Say no to hibernation, or write disk.nix by hand."
-            .into());
-    }
 
     Ok(Layout { system: system.path.clone(), home, encrypt, hibernate, ephemeral })
 }
@@ -1146,7 +1139,7 @@ fn esp() -> Field {
 /// A blank snapshot of @root is taken in a postCreateHook, which is the one
 /// moment @root is empty - disko has just made it and nixos-install has not
 /// run. Taken later, "blank" would contain an entire system.
-fn ephemeral_btrfs(inner_of: Option<&str>) -> Nix {
+fn ephemeral_btrfs(inner_of: Option<&str>, swap_gib: u64) -> Nix {
     let subvol = |mount: &str| {
         nix::attrs(vec![
             field("mountpoint", s(mount)),
@@ -1175,6 +1168,15 @@ fn ephemeral_btrfs(inner_of: Option<&str>) -> Nix {
                     "Everything declared is bound out of here, including the home\npaths - so this is what to snapshot or back up.",
                     subvol("/persist"),
                 ),
+                noted(
+                    "\"@swap\"",
+                    "Headroom, not hibernation - a second tier under zram for when\ncold pages stop compressing well. A file rather than a\npartition because nothing here needs a stable resume offset,\nand a file can be resized or dropped without repartitioning.\nIts own subvolume, uncompressed and never snapshotted, which\nis what a swapfile on btrfs requires.",
+                    nix::attrs(vec![
+                        field("mountpoint", s("/swap")),
+                        field("mountOptions", Nix::List(vec![s("noatime")])),
+                        field("swap.swapfile.size", s(&format!("{swap_gib}G"))),
+                    ]),
+                ),
             ]),
         ),
         field("postCreateHook", Nix::Raw(format!("''\n{hook}          ''"))),
@@ -1183,6 +1185,11 @@ fn ephemeral_btrfs(inner_of: Option<&str>) -> Nix {
 
 fn render_disk_nix(l: &Layout) -> Result<String, String> {
     let system = stable_device(&l.system)?;
+
+    // Half of RAM, within reason. Enough to be a real second tier under zram
+    // without taking a bite out of the disk for a machine that will rarely
+    // touch it; the file can be resized later without repartitioning.
+    let swap_gib = (ram_gib()? / 2).clamp(2, 16);
     let mut devices: Vec<Field> = Vec::new();
     let mut disks: Vec<Field> = Vec::new();
 
@@ -1237,7 +1244,7 @@ fn render_disk_nix(l: &Layout) -> Result<String, String> {
                     field(
                         "content",
                         if l.ephemeral {
-                            luks("cryptroot", ephemeral_btrfs(Some("cryptroot")), vec![])
+                            luks("cryptroot", ephemeral_btrfs(Some("cryptroot"), swap_gib), vec![])
                         } else {
                             luks("cryptroot", fs_content("/"), vec![])
                         },
@@ -1269,7 +1276,7 @@ fn render_disk_nix(l: &Layout) -> Result<String, String> {
                     field("size", s("100%")),
                     field(
                         "content",
-                        if l.ephemeral { ephemeral_btrfs(None) } else { fs_content("/") },
+                        if l.ephemeral { ephemeral_btrfs(None, swap_gib) } else { fs_content("/") },
                     ),
                 ]),
             )],

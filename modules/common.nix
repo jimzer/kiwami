@@ -50,6 +50,17 @@
   };
   security.sudo.wheelNeedsPassword = false;
 
+  # Compressed swap in RAM, since there is no swap partition: hibernation is
+  # the only reason to want one, and it is not available with a root that gets
+  # rolled back. Without this there is no swap at all, and the kernel's only
+  # way to free memory is evicting the page cache - throwing out the
+  # executables it is running from, then reaching for the OOM killer sooner.
+  #
+  # Cold pages compress well, so this holds appreciably more than it costs.
+  # It is also pure configuration: no partition, and a rebuild away from being
+  # changed or joined by a swapfile.
+  zramSwap.enable = true;
+
   # State this distro knows it needs. Everything here was learned the hard
   # way or is a well-known trap:
   #
