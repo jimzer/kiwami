@@ -179,6 +179,26 @@ boot test with screenshots).
 - [ ] The login banner hardcodes the clone URL; generate it from the flake
       rather than letting a moved repo rot it silently
 
+### Passwords on an ephemeral root  *(open, and a trap)*
+Found by diffing the discarded root against the blank snapshot: everything in
+/etc that is persisted showed up as a 0-byte bind-mount point, and
+`/etc/shadow` showed up as 1125 bytes of real data. It is where password
+hashes live when users are mutable, which is the default - so `passwd`
+appears to work and silently reverts at the next boot.
+
+- [ ] Do **not** simply add /etc/shadow to persist.files. If impermanence
+      creates the persistent copy empty rather than seeding it from the
+      existing file, the bind mount puts an empty shadow over a real one:
+      every account loses its hash, on a machine that wipes itself every
+      boot. Not a thing to establish by trying it
+- [ ] The declarative fix instead: `users.mutableUsers = false` and
+      `hashedPasswordFile = "/persist/passwords/<user>"`. The user database
+      comes from the config, only the secret is state, and a wiped /etc/shadow
+      is regenerated at activation rather than being something to preserve
+- [ ] Which means the installer needs to write that file, and therefore needs
+      to ask for a password after all - reversing the earlier decision, for a
+      reason that did not exist when it was made
+
 ### Impermanence  *(phase 0 done; btrfs chosen)*
 - [ ] `disk.nix` gains a btrfs variant: one partition, subvolumes `@root`
       `@nix` `@persist` `@home`. Disko does subvolumes natively; sizes stay
