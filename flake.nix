@@ -93,6 +93,7 @@
             wrapProgram $out/bin/kiwami --prefix PATH : ${pkgs.lib.makeBinPath (with pkgs; [
               curl            # the "am I online" probe
               git             # staging the generated hardware.nix
+              mkpasswd        # hashing for `kiwami passwd`
             ])}
           '';
         };

@@ -452,6 +452,9 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     let flake_ref = format!("{}#{}", flake, host.name);
     run("nixos-install", &["--flake", &flake_ref, "--no-root-passwd"])?;
 
+    println!("==> seeding the password");
+    seed_password(&flake, &host.name)?;
+
     println!("==> carrying network state over");
     carry_network_state()?;
 
@@ -1446,6 +1449,65 @@ fn target_uid(user: &str) -> Option<u32> {
         let mut f = l.split(':');
         (f.next()? == user).then(|| f.nth(1)?.parse().ok())?
     })
+}
+
+/// Give the new machine a password it can be logged into.
+///
+/// Users are immutable, so there is no initialPassword to fall back on: with
+/// no hash file the account simply has no password, and that is discovered at
+/// a greeter on a machine that has just been installed.
+///
+/// A known default rather than a prompt, so an unattended install still
+/// works. `kiwami doctor` reports it as a default until it is changed, which
+/// is the honest trade - a machine you can log into and a visible nag, rather
+/// than one you cannot.
+const DEFAULT_PASSWORD: &str = "kiwami";
+
+fn seed_password(flake: &str, host: &str) -> Result<(), String> {
+    let dir = Command::new("nix")
+        .args([
+            "--extra-experimental-features",
+            "nix-command flakes",
+            "eval",
+            "--raw",
+            &format!("{flake}#nixosConfigurations.{host}.config.kiwami.passwordFile"),
+        ])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| "/var/lib/kiwami/passwords".to_string());
+
+    let users = target_users(flake, host);
+    for user in &users {
+        let target = target_state_path(&format!("{}/{}", dir.trim_start_matches('/'), user));
+        if target.exists() {
+            continue;
+        }
+        let parent = target.parent().ok_or("bad password path")?;
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+
+        let out = Command::new("mkpasswd")
+            .args(["-m", "sha-512", "-s"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .and_then(|mut c| {
+                use std::io::Write;
+                c.stdin.as_mut().unwrap().write_all(DEFAULT_PASSWORD.as_bytes())?;
+                c.wait_with_output()
+            })
+            .map_err(|e| format!("mkpasswd: {e}"))?;
+        if !out.status.success() {
+            return Err("mkpasswd failed".into());
+        }
+        fs::write(&target, &out.stdout).map_err(|e| e.to_string())?;
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o600))
+            .map_err(|e| e.to_string())?;
+        println!("    {user}: default password, change it with `kiwami passwd`");
+    }
+    Ok(())
 }
 
 /// Put the flake on the installed system.

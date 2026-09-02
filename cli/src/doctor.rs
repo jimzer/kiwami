@@ -522,6 +522,83 @@ fn home_dir() -> Option<std::path::PathBuf> {
     std::env::var_os("HOME").map(std::path::PathBuf::from).filter(|p| p.is_dir())
 }
 
+/// Whether a stored hash is still the installer's default.
+///
+/// Hashes are salted, so they cannot be compared directly. Re-hashing the
+/// known default with the salt from the stored hash reproduces it exactly if
+/// and only if the password is unchanged.
+fn is_default_password(file: &std::path::Path) -> bool {
+    let Ok(stored) = fs::read_to_string(file) else { return false };
+    let stored = stored.trim();
+    // $6$<salt>$<hash>
+    let parts: Vec<&str> = stored.split('$').collect();
+    if parts.len() < 4 {
+        return false;
+    }
+    let salt = parts[2];
+    let Some(rehashed) = hash_with_salt("kiwami", salt) else { return false };
+    rehashed.trim() == stored
+}
+
+fn hash_with_salt(password: &str, salt: &str) -> Option<String> {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut child = Command::new("mkpasswd")
+        .args(["-m", "sha-512", "-S", salt, "-s"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .ok()?;
+    child.stdin.as_mut()?.write_all(password.as_bytes()).ok()?;
+    let out = child.wait_with_output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+/// Whether somebody has run `passwd` on a machine where it does nothing.
+///
+/// With mutableUsers off, passwd still writes to /etc/shadow and still says
+/// it succeeded. Activation then regenerates the file from the configured
+/// hash, so the change disappears - at the next rebuild, or at the next boot
+/// on a machine whose root is wiped. The user is told it worked and finds out
+/// otherwise at a login prompt.
+fn password_is_declarative() -> Finding {
+    let Ok(dir) = fs::read_to_string("/etc/kiwami/password-dir") else {
+        return Finding::new(Level::Skip, "passwords are managed by passwd here");
+    };
+    let dir = dir.trim();
+    if dir.is_empty() {
+        return Finding::new(Level::Skip, "passwords are managed by passwd here");
+    }
+
+    let Some(user) = fs::read_to_string("/etc/kiwami/persist.json")
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("user")?.as_str().map(str::to_string))
+    else {
+        return Finding::new(Level::Skip, "cannot tell which user to check");
+    };
+
+    let file = std::path::Path::new(dir).join(&user);
+    if file.is_file() {
+        // Still the one the installer wrote? The hash is salted, so the check
+        // is to re-hash the default with the stored salt and compare - which
+        // is the only way to tell without keeping a copy of the plaintext.
+        if is_default_password(&file) {
+            return Finding::new(Level::Warn, format!("{user} still has the install default"))
+                .detail("anyone who has read the docs knows it")
+                .remedy("sudo kiwami passwd");
+        }
+        Finding::new(Level::Ok, format!("{user} has a password of their own"))
+            .detail(format!("hashed in {}", file.display()))
+    } else {
+        Finding::new(Level::Fail, format!("{user} has no persistent password"))
+            .detail(
+                "this machine wipes /etc/shadow at every boot, so `passwd` reports\n                 success and changes nothing that lasts",
+            )
+            .remedy("sudo kiwami passwd")
+    }
+}
+
 /// Whether the root was actually wiped this boot.
 ///
 /// Only meaningful on a machine with an ephemeral root, and the reason it
@@ -712,7 +789,7 @@ pub fn run() -> Result<(), ()> {
             shell_unit(),
             theme_applied(),
         ]),
-        ("hygiene", vec![generations(), lock_age(), hardware_drift(), root_was_wiped(), unpersisted_state()]),
+        ("hygiene", vec![generations(), lock_age(), hardware_drift(), root_was_wiped(), password_is_declarative(), unpersisted_state()]),
     ];
 
     let mut fails = 0;

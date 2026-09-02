@@ -48,6 +48,10 @@ in
     "kiwami/bar.json".text = barManifest;
 
     # The persist list, where the CLI can read it without evaluating Nix.
+    # Where `kiwami passwd` writes. Generated so the CLI reads the option
+    # rather than carrying its own copy of the path.
+    "kiwami/password-dir".text = cfg.passwordFile;
+
     "kiwami/persist.json".text = builtins.toJSON {
       directories = cfg.persist.directories;
       files = cfg.persist.files;

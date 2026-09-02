@@ -81,6 +81,26 @@ in
       '';
     };
 
+    passwordFile = mkOption {
+      type = types.str;
+      default = "/var/lib/kiwami/passwords";
+      description = ''
+        Directory holding one hashed password per user, read at activation.
+
+        The hash lives on the machine and never in the repository, so the
+        config stays publishable while the secret does not travel.
+
+        Under /var/lib/kiwami deliberately: that path is already persisted, so
+        the same arrangement works whether or not the root is ephemeral. There
+        is no second mode to reason about.
+
+        users.mutableUsers is off everywhere as a result, which is what makes
+        this the only way in - nixpkgs drops the setuid passwd wrapper when
+        users are immutable, so the wrong command is not merely discouraged,
+        it is absent.
+      '';
+    };
+
     persist = {
       directories = mkOption {
         type = types.listOf types.str;

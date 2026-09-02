@@ -10,9 +10,21 @@
   time.timeZone = lib.mkDefault "Europe/Zurich";
   i18n.defaultLocale = lib.mkDefault "en_US.UTF-8";
 
+  # One way to set a password, everywhere. `passwd` writes to /etc/shadow,
+  # which an ephemeral root discards while reporting success - so rather than
+  # supporting two modes and explaining when each applies, users are immutable
+  # on every machine and the hash comes from a file. nixpkgs drops the setuid
+  # passwd wrapper when mutableUsers is off, so the wrong command is absent
+  # rather than merely wrong.
+  users.mutableUsers = false;
+
   users.users.${config.kiwami.user} = {
     isNormalUser = true;
     extraGroups = [ "wheel" "video" "audio" "networkmanager" ];
+    # Written by `kiwami install`, changed by `kiwami passwd`. Without it the
+    # account has no password at all - and with immutable users there is no
+    # initialPassword fallback, so that is discovered at a greeter.
+    hashedPasswordFile = "${config.kiwami.passwordFile}/${config.kiwami.user}";
   };
   security.sudo.wheelNeedsPassword = false;
 
@@ -71,5 +83,20 @@
   environment.systemPackages = [
     # The distro's own CLI, built from cli/ by this flake.
     inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.kiwami
+
+    # And passwd taken away. Immutable users drop its setuid wrapper, so an
+    # unprivileged passwd fails loudly - but `sudo passwd` still reports
+    # "password updated successfully" and is reverted at the next activation.
+    # That was verified, not assumed. Detecting it afterwards is worse than
+    # not shipping the footgun, so the binary is shadowed by one that says
+    # where to go instead. hiPrio wins the collision with the shadow package,
+    # which is still needed for su and friends.
+    (lib.hiPrio (pkgs.writeShellScriptBin "passwd" ''
+      echo "passwd does nothing here: users are immutable, so the hash comes" >&2
+      echo "from a file and /etc/shadow is regenerated at activation." >&2
+      echo >&2
+      echo "  sudo kiwami passwd" >&2
+      exit 1
+    ''))
   ] ++ (with pkgs; [ git vim curl htop rsync jq ]);
 }

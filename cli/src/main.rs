@@ -4,6 +4,7 @@ mod install;
 mod net;
 mod nix;
 mod remote;
+mod passwd;
 mod paths;
 mod theme;
 
@@ -49,6 +50,11 @@ enum Cmd {
     },
     /// List disks the installer can see, and exit
     Disks,
+    /// Set the desktop user's password on a machine with an ephemeral root
+    Passwd {
+        /// Whose password. Defaults to the invoking user.
+        user: Option<String>,
+    },
     /// Join a tailnet so this machine can be reached during an install
     Remote {
         /// Disconnect instead of connecting
@@ -134,6 +140,12 @@ fn main() -> std::process::ExitCode {
         }
         Cmd::Doctor => {
             if doctor::run().is_err() {
+                return std::process::ExitCode::FAILURE;
+            }
+        }
+        Cmd::Passwd { user } => {
+            if let Err(e) = passwd::run(user) {
+                eprintln!("passwd: {e}");
                 return std::process::ExitCode::FAILURE;
             }
         }
