@@ -107,15 +107,21 @@ in
 
       userDirectories = mkOption {
         type = types.listOf types.str;
-        default = [ "kiwami" ".ssh" ];
+        default = [ "kiwami" ".ssh" ".local/state" ];
         description = ''
           Paths under the desktop user's home that must survive, relative to
           it. They are stored in /persist/home/<user> and bound back.
 
-          The default is not decoration: with an ephemeral root, home is wiped
-          too, and ~/kiwami is the flake the machine rebuilds itself from. A
-          machine that wipes its own configuration on first reboot is one you
-          can no longer change.
+          The defaults are not decoration:
+
+          ~/kiwami is the flake the machine rebuilds itself from. A machine
+          that wipes its own configuration on first reboot is one you can no
+          longer change.
+
+          ~/.local/state holds the selected theme, among other runtime state
+          the desktop keeps between sessions. Without it the theme resets at
+          every boot and `kiwami doctor` reports "no theme applied" on a
+          machine that was themed yesterday.
         '';
       };
     };

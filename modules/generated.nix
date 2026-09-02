@@ -51,6 +51,10 @@ in
     "kiwami/persist.json".text = builtins.toJSON {
       directories = cfg.persist.directories;
       files = cfg.persist.files;
+      # Relative to the desktop user's home. Without these the report calls
+      # ~/.local undeclared while ~/.local/state is being persisted.
+      user = cfg.user;
+      userDirectories = cfg.persist.userDirectories;
     };
     "kiwami/shell".source = ../shell;
 

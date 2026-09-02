@@ -521,6 +521,96 @@ fn home_dir() -> Option<std::path::PathBuf> {
     std::env::var_os("HOME").map(std::path::PathBuf::from).filter(|p| p.is_dir())
 }
 
+/// Whether the root was actually wiped this boot.
+///
+/// Only meaningful on a machine with an ephemeral root, and the reason it
+/// exists is that the failure is silent in the direction that looks healthy:
+/// if the initrd rollback does not run, nothing is wiped, everything
+/// persists, and the machine behaves perfectly well while quietly
+/// accumulating exactly the state it was set up to discard.
+///
+/// A subvolume's creation time is when it was made. Restored from a blank
+/// snapshot at boot, it is younger than the boot; left alone, it dates from
+/// the install.
+fn root_was_wiped() -> Finding {
+    if !std::path::Path::new("/persist").is_dir() {
+        return Finding::new(Level::Skip, "not an ephemeral-root machine");
+    }
+    let Some(show) = output("btrfs", &["subvolume", "show", "/"]) else {
+        return Finding::new(Level::Skip, "cannot read the root subvolume (needs root)");
+    };
+    let Some(created) = show
+        .lines()
+        .find(|l| l.trim_start().starts_with("Creation time:"))
+        .and_then(|l| l.split_once(':').map(|(_, v)| v.trim().to_string()))
+    else {
+        return Finding::new(Level::Skip, "no creation time for the root subvolume");
+    };
+
+    // Uptime is the cheapest boot clock available and needs no parsing of
+    // timezones from btrfs's output beyond a date call.
+    let uptime: f64 = fs::read_to_string("/proc/uptime")
+        .ok()
+        .and_then(|s| s.split_whitespace().next()?.parse().ok())
+        .unwrap_or(0.0);
+    let created_epoch: Option<i64> = output("date", &["-d", &created, "+%s"])
+        .and_then(|s| s.trim().parse().ok());
+    let now_epoch: Option<i64> =
+        output("date", &["+%s"]).and_then(|s| s.trim().parse().ok());
+
+    match (created_epoch, now_epoch) {
+        (Some(c), Some(n)) => {
+            let age = n - c;
+            if (age as f64) <= uptime + 120.0 {
+                Finding::new(Level::Ok, "the root was wiped this boot")
+                    .detail(format!("root subvolume is {age}s old, uptime {uptime:.0}s"))
+            } else {
+                Finding::new(Level::Fail, "the root was NOT wiped this boot")
+                    .detail(format!(
+                        "root subvolume is {age}s old but the machine booted {uptime:.0}s ago,\n\
+                         so it survived the reboot - the initrd rollback did not run"
+                    ))
+                    .remedy("journalctl -b -u initrd-rollback, or check the initrd unit")
+            }
+        }
+        _ => Finding::new(Level::Skip, "could not compare the root's age to uptime"),
+    }
+}
+
+/// Walk a directory reporting what is not covered by the declared list.
+///
+/// Descends into a directory that is only partly declared, so ~/.local shows
+/// up as ~/.local/share rather than as the whole of ~/.local - persisting
+/// ~/.local/state should not make its siblings invisible, nor should it make
+/// the parent look entirely undeclared. Bounded, because the interesting
+/// answers are near the top and a full walk of a home directory is not a
+/// report anybody reads.
+fn collect_undeclared(
+    dir: &std::path::Path,
+    declared: &[String],
+    depth: usize,
+    out: &mut Vec<String>,
+) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    for e in entries.filter_map(Result::ok) {
+        let path = e.path();
+        let p = path.to_string_lossy().to_string();
+        let covered = declared.iter().any(|d| p == *d || p.starts_with(&format!("{d}/")));
+        if covered {
+            continue;
+        }
+        // Something declared lives underneath, so this directory is partly
+        // kept: look inside rather than condemning the whole of it.
+        let has_declared_child =
+            declared.iter().any(|d| d.starts_with(&format!("{p}/")));
+        if has_declared_child && path.is_dir() && depth < 3 {
+            collect_undeclared(&path, declared, depth + 1, out);
+        } else {
+            out.push(p);
+        }
+    }
+}
+
 /// What would be lost if the root filesystem were wiped.
 ///
 /// Not a wipe, and nothing here changes anything: the point is to answer
@@ -567,20 +657,23 @@ fn unpersisted_state() -> Finding {
         return Finding::new(Level::Ok, "all /var/lib and home state is declared");
     }
 
+    // Home paths are declared relative to the user's home, so resolve them
+    // before comparing - otherwise every one of them looks undeclared.
+    let mut declared = declared;
+    if let (Some(home), Some(dirs)) = (home_dir(), list.get("userDirectories").and_then(|v| v.as_array()))
+    {
+        for d in dirs.iter().filter_map(|v| v.as_str()) {
+            declared.push(home.join(d).to_string_lossy().to_string());
+        }
+    }
+
     // Home too, and this is the half that matters most. /var/lib holds
     // service state that is mostly disposable; home holds the things whose
     // loss is actually felt, and it is the largest source of state nothing
     // declared. Keeping it whole exempts it from the discipline, so at least
     // report what is in there.
     if let Some(home) = home_dir() {
-        if let Ok(entries) = fs::read_dir(&home) {
-            for e in entries.filter_map(Result::ok) {
-                let p = e.path().to_string_lossy().to_string();
-                if !declared.iter().any(|d| p == *d || p.starts_with(&format!("{d}/"))) {
-                    unlisted.push(p);
-                }
-            }
-        }
+        collect_undeclared(&home, &declared, 0, &mut unlisted);
     }
     unlisted.sort();
 
@@ -618,7 +711,7 @@ pub fn run() -> Result<(), ()> {
             shell_unit(),
             theme_applied(),
         ]),
-        ("hygiene", vec![generations(), lock_age(), hardware_drift(), unpersisted_state()]),
+        ("hygiene", vec![generations(), lock_age(), hardware_drift(), root_was_wiped(), unpersisted_state()]),
     ];
 
     let mut fails = 0;
