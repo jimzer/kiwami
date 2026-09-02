@@ -18,6 +18,28 @@
   # rather than merely wrong.
   users.mutableUsers = false;
 
+  # Make sure the hash file exists before users are created. With immutable
+  # users a missing hashedPasswordFile does not fall back to anything - the
+  # account is simply never given a password and cannot log in. The installer
+  # seeds it, but a machine built any other way (the CI boot test, or an
+  # install where seeding failed) would come up with a user nobody can be.
+  #
+  # The default is a fixed hash of "kiwami"; `kiwami doctor` reports it as the
+  # install default until `kiwami passwd` replaces it.
+  system.activationScripts.kiwamiPassword = {
+    deps = [ "specialfs" ];
+    text = ''
+      mkdir -p ${config.kiwami.passwordFile}
+      chmod 700 ${config.kiwami.passwordFile}
+      if [ ! -s ${config.kiwami.passwordFile}/${config.kiwami.user} ]; then
+        echo '$6$kiwamidefault$RHqPdZfAbfcBgynCC4GyrLHRK4DT0IXCI6QwVxObCgTY9Ky6dUSfFpyhBLvBuTozVnGeXnNSczef4HvLQPy1U1' \
+          > ${config.kiwami.passwordFile}/${config.kiwami.user}
+        chmod 600 ${config.kiwami.passwordFile}/${config.kiwami.user}
+      fi
+    '';
+  };
+  system.activationScripts.users.deps = [ "kiwamiPassword" ];
+
   users.users.${config.kiwami.user} = {
     isNormalUser = true;
     extraGroups = [ "wheel" "video" "audio" "networkmanager" ];

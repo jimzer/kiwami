@@ -130,7 +130,10 @@
                 ];
                 home.stateVersion = "26.05";
               };
-              users.users.nixos.initialPassword = "kiwami";
+              # No initialPassword: immutable users take the hash from
+              # kiwami.passwordFile, which activation seeds. This test caught
+              # the case where that file did not exist - the account was never
+              # given a password and user@1000 never started.
               kiwami.autoLogin = true;
               virtualisation.memorySize = 4096;
               virtualisation.cores = 2;

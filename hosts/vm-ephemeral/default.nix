@@ -45,8 +45,9 @@
   environment.systemPackages = [ pkgs.efibootmgr ];
 
   # Throwaway guest credentials. These must never appear on a real host.
-  users.users.nixos.initialPassword = "kiwami";
-  users.users.root.initialPassword = "kiwami";
+  # No initialPassword: users are immutable, so the hash comes from
+  # kiwami.passwordFile, which activation seeds with the default. Setting both
+  # is a conflict Nix warns about, and the file wins.
   services.openssh.settings.PermitRootLogin = "yes";
 
   system.stateVersion = "26.05";
