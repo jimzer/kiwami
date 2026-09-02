@@ -12,6 +12,9 @@ PanelWindow {
     id: root
 
     anchors { top: true; right: true }
+    // Same reason as the OSD: a notification arriving must not resize the
+    // windows underneath it.
+    exclusiveZone: 0
     margins { top: Theme.barHeight + Theme.gap; right: Theme.gap }
     implicitWidth: 380
     implicitHeight: Math.max(1, column.implicitHeight)

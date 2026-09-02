@@ -20,6 +20,12 @@ PanelWindow {
     visible: false
 
     anchors { bottom: true }
+    // Float over the windows instead of pushing them aside. A layer surface
+    // anchored to an edge reserves an exclusive zone by default, so every
+    // volume or brightness tap was shoving the whole layout up by 56px for a
+    // second and a half. Nothing that appears briefly should reflow the
+    // desktop.
+    exclusiveZone: 0
     margins.bottom: 80
     implicitWidth: 260
     implicitHeight: 56
