@@ -26,6 +26,25 @@ Row {
         return "󰤟";
     }
 
+    // nmcli -t separates fields with ':' and backslash-escapes any ':' inside a
+    // value. Walked by hand rather than with a lookbehind regex: QML's
+    // JavaScript engine does not support them, and the failure is silent - the
+    // widget simply rendered "disconnected" on a machine that was online.
+    function splitTerse(line) {
+        const out = [""];
+        for (let i = 0; i < line.length; i++) {
+            const ch = line[i];
+            if (ch === "\\" && i + 1 < line.length) {
+                out[out.length - 1] += line[++i];
+            } else if (ch === ":") {
+                out.push("");
+            } else {
+                out[out.length - 1] += ch;
+            }
+        }
+        return out;
+    }
+
     Process {
         id: poll
         running: true
@@ -42,7 +61,7 @@ Row {
                     root.kind = "none"; root.name = ""; root.strength = 0;
                     return;
                 }
-                const f = lines[0].split(/(?<!\\):/).map(s => s.replace(/\\:/g, ":"));
+                const f = root.splitTerse(lines[0]);
                 root.kind = f[0] || "none";
                 root.name = f[3] || "";
                 if (lines.length > 1) {
