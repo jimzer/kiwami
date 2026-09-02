@@ -7,18 +7,24 @@ pub fn repo() -> PathBuf {
     if let Some(explicit) = std::env::var_os("KIWAMI_REPO") {
         return PathBuf::from(explicit);
     }
-    let here = home().join("kiwami");
-    if here.exists() {
-        return here;
+    user_home().join("kiwami")
+}
+
+/// The home of whoever invoked us, not root's.
+///
+/// Under sudo, HOME is /root. Everything the desktop keeps lives in the real
+/// user's home, so a check run with sudo - which is how `kiwami doctor` is
+/// meant to be run - looks in the wrong place and reports a machine as
+/// unthemed while it is sitting there themed.
+pub fn user_home() -> PathBuf {
+    let here = home();
+    if let Some(user) = std::env::var_os("SUDO_USER") {
+        let p = PathBuf::from("/home").join(user);
+        if p.is_dir() {
+            return p;
+        }
     }
-    // Under sudo, HOME is root's, so the checkout in the invoking user's home
-    // is invisible - and doctor's hardware and flake.lock checks both need
-    // root. Silently reporting "no checkout here" while one sits in
-    // /home/you/kiwami is worse than not having the check.
-    std::env::var_os("SUDO_USER")
-        .map(|u| PathBuf::from("/home").join(u).join("kiwami"))
-        .filter(|p| p.exists())
-        .unwrap_or(here)
+    here
 }
 
 pub fn home() -> PathBuf {
@@ -46,7 +52,7 @@ pub fn find_theme(name: &str) -> Option<PathBuf> {
 }
 
 pub fn state() -> PathBuf {
-    home().join(".local/state/kiwami")
+    user_home().join(".local/state/kiwami")
 }
 
 /// The stable path every themed application points at. Switching themes

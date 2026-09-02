@@ -133,7 +133,8 @@ fn nix_env() -> Finding {
 }
 
 fn stray_binaries() -> Finding {
-    let home = paths::home();
+    // The invoking user's home, not root's: doctor runs under sudo.
+    let home = paths::user_home();
     let dirs = [home.join(".local/bin"), home.join("bin")];
     let mut found = Vec::new();
 
