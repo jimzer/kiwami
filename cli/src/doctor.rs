@@ -800,8 +800,6 @@ fn collect_ephemeral_loss(declared: &[String], out: &mut Vec<String>) {
 
 /// Whether a stored hash is still the installer's default.
 /// Whether somebody has run `passwd` on a machine where it does nothing.
-///
-
 /// Whether the root was actually wiped this boot.
 ///
 /// Only meaningful on a machine with an ephemeral root, and the reason it

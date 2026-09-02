@@ -90,10 +90,22 @@ struct Network {
 }
 
 fn connect_wifi() -> Result<(), String> {
-    if !devices()?.iter().any(|d| d.kind == "wifi") {
-        return Err("no network, and no wifi device found.\n\
-                    If this machine has wifi, the firmware may be missing."
-            .into());
+    // Wait for the wifi device rather than deciding immediately. Straight
+    // after boot the driver may still be loading its firmware and rfkill may
+    // not have been released yet, so the first look finds nothing on a machine
+    // that has perfectly good wifi - which is exactly when the installer runs.
+    let mut waited = 0;
+    while !devices()?.iter().any(|d| d.kind == "wifi") {
+        if waited >= 20 {
+            return Err("no network, and no wifi device appeared after 20s.\n\
+                        If this machine has wifi, the firmware may be missing."
+                .into());
+        }
+        if waited == 0 {
+            println!("    waiting for a wifi device");
+        }
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        waited += 2;
     }
 
     loop {
@@ -104,8 +116,23 @@ fn connect_wifi() -> Result<(), String> {
         let _ = nmcli(&["device", "wifi", "rescan"]);
         let networks = scan()?;
 
+        // A first scan straight after the device appears usually returns
+        // nothing: the radio has not swept the channels yet. Giving up here
+        // sent the guided installer to an error on a machine surrounded by
+        // networks, and running it again a minute later worked.
+        let mut networks = networks;
+        let mut tries = 0;
+        while networks.is_empty() && tries < 4 {
+            println!("    no networks yet, scanning again");
+            std::thread::sleep(std::time::Duration::from_secs(4));
+            let _ = nmcli(&["device", "wifi", "rescan"]);
+            networks = scan()?;
+            tries += 1;
+        }
         if networks.is_empty() {
-            return Err("no wifi networks found. Move closer, or use `nmtui` for a hidden SSID.".into());
+            return Err("no wifi networks found after several scans. Move closer, or use\n\
+                        `nmtui` for a hidden SSID."
+                .into());
         }
 
         println!("\nNetworks:\n");

@@ -584,8 +584,13 @@ fn flake_hosts(flake: &str) -> Result<Vec<String>, String> {
             "eval",
             "--json",
             &format!("{flake}#nixosConfigurations"),
+            // Only what can actually be installed. The installer images are
+            // in here too, and offering them as install targets is offering
+            // to install the installer - they have no disk layout, which is
+            // the property that decides it rather than their name.
             "--apply",
-            "builtins.attrNames",
+            "cfgs: builtins.filter (n: (cfgs.${n}.config.disko.devices.disk or {}) != {}) \
+             (builtins.attrNames cfgs)",
         ])
         .output()
         .map_err(|e| format!("cannot run nix: {e}"))?;
@@ -638,9 +643,7 @@ fn resolve_host(
         return Ok(HostPlan { name: want, create: true });
     }
 
-    if hosts.is_empty() {
-        return Err(format!("{flake} defines no hosts. Pass --host <name> --new."));
-    }
+
     if assume_yes {
         return Err(format!(
             "--yes needs an explicit --host.\nAvailable: {}",
@@ -648,18 +651,48 @@ fn resolve_host(
         ));
     }
 
-    println!("\nHosts:\n");
+    println!("\nMachines this flake already describes:\n");
     for (i, h) in hosts.iter().enumerate() {
         println!("  {}) {h}", i + 1);
     }
+    // Without this the guided installer could only reinstall a machine the
+    // flake already knew about - which is not what anybody boots an installer
+    // to do. Installing a new machine was reachable only by remembering
+    // --host <name> --new, which the guided flow exists to avoid.
+    println!("\n  n) a new machine");
+
     loop {
-        let answer = prompt(&format!("\nInstall which host? [1-{}] ", hosts.len()))
-            .map_err(|e| e.to_string())?;
+        let answer =
+            prompt(&format!("\nWhich? [1-{}, or n] ", hosts.len())).map_err(|e| e.to_string())?;
+
+        if answer.eq_ignore_ascii_case("n") {
+            if !writable {
+                return Err("a new machine needs somewhere to write its hardware, and this\n\
+                            flake is read-only. Install from a local checkout."
+                    .into());
+            }
+            loop {
+                let name = prompt(
+                    "\nName for this machine? It becomes hosts/<name>/ and the thing you\n\
+                     type in every future rebuild: ",
+                )
+                .map_err(|e| e.to_string())?;
+                if hosts.contains(&name) {
+                    println!("{name} already exists; pick it from the list, or choose another name.");
+                    continue;
+                }
+                match validate_host_name(&name) {
+                    Ok(()) => return Ok(HostPlan { name, create: true }),
+                    Err(e) => println!("{e}"),
+                }
+            }
+        }
+
         match answer.parse::<usize>() {
             Ok(n) if n >= 1 && n <= hosts.len() => {
                 return Ok(HostPlan { name: hosts[n - 1].clone(), create: false })
             }
-            _ => println!("Enter a number between 1 and {}.", hosts.len()),
+            _ => println!("Enter a number between 1 and {}, or n for a new machine.", hosts.len()),
         }
     }
 }
