@@ -26,6 +26,108 @@ thing on my XPS 13 over Tailscale, and now iterates on it while I watch.
 
 ---
 
+## Why this is worth building (the actual pitch)
+
+The failures below are the entertaining part. This is the part that makes the
+failures worth having.
+
+### The machine is a git repo
+
+Not "configured by" a git repo — *is* one. `hosts/xps/` is three files: what the
+hardware is, what I chose, how the disk is laid out. Everything else is shared
+with every other Kiwami machine. Reinstall from that commit and you get the same
+machine, byte for byte, because the lock file pins every input.
+
+Which means: **rebuild is a normal operation, not a disaster.** Wrong kernel?
+Reboot into the previous generation from the boot menu. Bad experiment? Revert
+the commit. Nothing is a one-way door.
+
+### Nothing accumulates
+
+The root filesystem is **deleted and recreated blank at every boot.** What
+survives is a list you wrote: passwords, wifi, SSH host keys, your files, the
+flake itself.
+
+The usual Linux experience is a machine that drifts — a config you edited in
+2023, a service you removed whose state is still in `/var/lib`, a `~/.config`
+full of things you can't account for. Here that's structurally impossible.
+Anything you didn't name is gone by morning.
+
+The payoff is a question you can suddenly answer: **what state does my computer
+actually have?** Mine: five paths, three of which are caches.
+
+### 776 KB
+
+That's the entire state of the laptop. Passwords, wifi profiles, SSH host keys,
+tailnet identity, uid allocations. The other 7.9 GB is the Nix store, which is
+*derivable* — a function of the repo and the lock file.
+
+Back up 776 KB and a git remote, and the machine is reconstructible. Not
+"restorable from an image" — reconstructible from a description.
+
+New laptop? Install, restore state, done. Dead SSD? Same. The difference between
+those two cases is one exclude list — whether the new machine inherits the old
+one's *identity* (SSH host keys, tailnet node) or gets its own.
+
+### The installer is one command and four questions
+
+Boot the image, it starts by itself:
+
+- get on the network (wifi menu if needed)
+- want someone to be able to help? → joins your tailnet, no key baked anywhere
+- which machine is this — pick one, or name a new one
+- which disk, separate `/home`?, encrypt?
+
+Then it shows you the disk layout it wrote, lets you edit it, and waits for you
+to type `yes`. Afterwards it detects your hardware, writes it into the repo,
+sets the boot order, carries your wifi and tailnet identity onto the new system,
+and leaves the flake in your home directory.
+
+Nothing to remember. Nothing typed twice.
+
+### It can be worked on remotely
+
+`kiwami remote` puts the machine on your tailnet with no key baked into the
+image and no secret in the repo — it prints a URL you approve from your phone.
+From there the whole loop works over the network: edit the shell's QML, push,
+rebuild on the laptop, trigger the launcher, screenshot it, look.
+
+That's how the desktop got debugged on real Intel graphics from a Mac in another
+room.
+
+### The machine tells you when it's drifting
+
+`kiwami doctor`:
+
+- packages installed imperatively instead of declared
+- stray binaries in `~/.local/bin`, global npm/cargo installs
+- failed units, a shell that's crash-looping rather than running
+- whether the root actually got wiped this boot
+- whether your password is still the install default
+- what exists that nothing declared — i.e. what tonight's reboot will eat
+
+The rule it follows: **assert effects, not appearances.** "The shell is running"
+is `pgrep`, which a crashlooping process satisfies. "The shell works" is a
+bounded restart count plus a mapped layer surface.
+
+### Themes switch without a rebuild
+
+Colours are typed options in Nix — a malformed hex value fails at evaluation,
+not at render — but switching is a runtime operation. `kiwami theme set
+midnight` retints the bar, the terminal and the compositor live. Declared like
+everything else; instant like nothing else.
+
+### And it's all one opinion
+
+No "two modes" anywhere. Every machine is ephemeral. Every user is immutable.
+There's one way to set a password, and `passwd` isn't it — it's been replaced by
+a script that tells you the right command.
+
+Every time I offered a choice, it produced a class of bug that only existed on
+one side of it. So the answer became: don't offer the choice.
+
+---
+
 ## Moments
 
 ### 1. The installer refused to run on the installer
@@ -243,6 +345,13 @@ doing its job.
 - **2** green CI runs on a desktop shell that was completely broken
 
 ## Angles for longer pieces
+
+- *A laptop with 776 KB of state* — what it means to back up a description
+  instead of an image, and why "reinstall" stops being frightening.
+- *Ephemeral root as a forcing function* — you cannot argue with a machine that
+  deletes everything you didn't declare.
+- *One opinion, no modes* — every either/or in this build produced a bug that
+  lived on exactly one branch of it.
 
 - *Why I let an agent drive a VM instead of writing the code myself* — the loop
   is edit → push → rebuild → screenshot → read logs, and the screenshot is what
