@@ -150,7 +150,14 @@
               # Without waiting, an early check races the manager's startup and
               # fails with "Failed to connect to user scope bus" - which looks
               # like a broken unit and is really just an impatient test.
-              machine.wait_for_unit("user@1000.service")
+              # wait_until_succeeds, not wait_for_unit: the latter raises the
+              # moment a unit is inactive with no job pending, and logind
+              # starts user@1000 a beat after greetd opens the session. That
+              # gap is a fraction of a second and it was lost the first time
+              # anything shifted boot timing - enabling zram was enough.
+              machine.wait_until_succeeds(
+                  "systemctl is-active user@1000.service", timeout=120
+              )
               machine.wait_until_succeeds("pgrep -f 'bin/Hyprland'", timeout=120)
 
               # The shell is a user unit gated on WAYLAND_DISPLAY, so its
