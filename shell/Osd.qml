@@ -103,23 +103,34 @@ PanelWindow {
         // The cost is that a brightness change from somewhere else, like
         // auto-dimming, shows no OSD. That is the honest trade for not polling
         // sysfs five times a second on a laptop.
-        path: (Quickshell.env("XDG_RUNTIME_DIR") || "/run/user/1000") + "/kiwami-brightness"
+        path: root.markerReady
+            ? (Quickshell.env("XDG_RUNTIME_DIR") || "/run/user/1000") + "/kiwami-brightness"
+            : ""
         watchChanges: true
         onFileChanged: backlight.reload()
     }
 
     property string backlightDir: ""
 
+    property bool markerReady: false
+
     Process {
-        // One shot at startup: find the first backlight, if there is one. A
-        // desktop has none and everything below stays inert.
-        id: findBacklight
+        // One shot at startup: create the marker, then find the backlight.
+        //
+        // The marker has to exist before it can be watched - inotify needs a
+        // file, and FileView does not retry once one appears. /run is empty at
+        // every boot on this machine, so without this the brightness OSD fails
+        // exactly once per boot, which is to say always.
+        id: init
         running: true
-        command: ["sh", "-c", "ls -d /sys/class/backlight/*/ 2>/dev/null | head -1"]
+        command: ["sh", "-c",
+            "touch \"$XDG_RUNTIME_DIR/kiwami-brightness\"; " +
+            "ls -d /sys/class/backlight/*/ 2>/dev/null | head -1"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const dir = text.trim().replace(/\/$/, "");
                 if (dir.length > 0) root.backlightDir = dir;
+                root.markerReady = true;
             }
         }
     }
