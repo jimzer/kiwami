@@ -203,7 +203,7 @@ in
 
       right = mkOption {
         type = types.listOf types.str;
-        default = [ "tray" "battery" "clock" ];
+        default = [ "tray" "network" "battery" "clock" ];
       };
     };
 
