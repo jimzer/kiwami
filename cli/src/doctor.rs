@@ -510,17 +510,6 @@ fn sort_list_literal(line: &str) -> String {
     format!("{}[ {} ]{}", &line[..open], items.join(" "), &line[close + 1..])
 }
 
-/// The invoking user's home, even under sudo - doctor needs root for most of
-/// what it reads, and root's home is not the one whose state matters.
-fn home_dir() -> Option<std::path::PathBuf> {
-    if let Some(user) = std::env::var_os("SUDO_USER") {
-        let p = std::path::PathBuf::from("/home").join(user);
-        if p.is_dir() {
-            return Some(p);
-        }
-    }
-    std::env::var_os("HOME").map(std::path::PathBuf::from).filter(|p| p.is_dir())
-}
 
 /// Whether a stored hash is still the installer's default.
 ///
@@ -655,39 +644,178 @@ fn root_was_wiped() -> Finding {
     }
 }
 
-/// Walk a directory reporting what is not covered by the declared list.
+
+/// Whether activation writes this again, so losing it costs nothing.
 ///
-/// Descends into a directory that is only partly declared, so ~/.local shows
-/// up as ~/.local/share rather than as the whole of ~/.local - persisting
-/// ~/.local/state should not make its siblings invisible, nor should it make
-/// the parent look entirely undeclared. Bounded, because the interesting
-/// answers are near the top and a full walk of a home directory is not a
-/// report anybody reads.
-fn collect_undeclared(
-    dir: &std::path::Path,
-    declared: &[String],
-    depth: usize,
-    out: &mut Vec<String>,
-) {
-    let Ok(entries) = fs::read_dir(dir) else { return };
-    for e in entries.filter_map(Result::ok) {
-        let path = e.path();
-        let p = path.to_string_lossy().to_string();
-        let covered = declared.iter().any(|d| p == *d || p.starts_with(&format!("{d}/")));
-        if covered {
-            continue;
+/// A short list rather than a set of directories to search: the walk stays
+/// general, and only the exceptions are named - each because something
+/// demonstrably rewrites it.
+///
+/// /etc/shadow is on it now, and was the whole reason this report exists.
+/// Under mutable users it held password hashes and was genuinely lost; with
+/// users immutable it is regenerated at activation from kiwami.passwordFile,
+/// so it is not state any more. The list changed because the system did.
+fn regenerated(path: &str) -> bool {
+    const WRITTEN_BY_ACTIVATION: [&str; 11] = [
+        // update-users-groups.pl, from the configuration and the hash file
+        "/etc/passwd", "/etc/group", "/etc/shadow", "/etc/subuid", "/etc/subgid",
+        // markers and mounts, recreated on every boot
+        "/etc/.clean", "/etc/.updated", "/etc/NIXOS", "/etc/mtab",
+        // written by the resolver and by systemd
+        "/etc/resolv.conf", "/etc/machine-id",
+    ];
+    if WRITTEN_BY_ACTIVATION.contains(&path) {
+        return true;
+    }
+
+    // environment.etc builds /etc/static as a symlink tree into the store and
+    // mirrors it into /etc. So NixOS keeps its own record of what it manages,
+    // and anything with a counterpart there is rebuilt at activation - which
+    // covers the directories it creates as well as the files, without naming
+    // any of them.
+    if let Some(rest) = path.strip_prefix("/etc/") {
+        if std::path::Path::new("/etc/static").join(rest).exists() {
+            return true;
         }
-        // Something declared lives underneath, so this directory is partly
-        // kept: look inside rather than condemning the whole of it.
-        let has_declared_child =
-            declared.iter().any(|d| d.starts_with(&format!("{p}/")));
-        if has_declared_child && path.is_dir() && depth < 3 {
-            collect_undeclared(&path, declared, depth + 1, out);
-        } else {
-            out.push(p);
+    }
+
+    // home-manager keeps the same kind of record: its generation carries a
+    // home-files tree mirroring every path it manages. So anything it writes
+    // into ~/.config is rebuilt at activation, which is the whole point of
+    // declaring it - a config file in home that is not in the flake is the
+    // bug, not the wipe. Self-updating for the same reason /etc/static is.
+    if let Some(managed) = home_manager_files() {
+        let home = paths::user_home();
+        if let Ok(rest) = std::path::Path::new(path).strip_prefix(&home) {
+            if managed.join(rest).exists() {
+                return true;
+            }
+        }
+    }
+
+    // systemd recreates what its units and tmpfiles rules declare: a service's
+    // StateDirectory reappears empty when it starts, a `d` rule reappears at
+    // boot. Both come from the units themselves, so this updates itself too -
+    // adding a service adds its rules and this notices.
+    tmpfiles_paths().iter().any(|t| path == t || path.starts_with(&format!("{t}/")))
+}
+
+/// The tree of files home-manager manages, from its current generation.
+fn home_manager_files() -> Option<std::path::PathBuf> {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let root = paths::user_home().join(".local/state/home-manager/gcroots/current-home");
+            let generation = fs::canonicalize(root).ok()?;
+            let files = generation.join("home-files");
+            files.is_dir().then_some(files)
+        })
+        .clone()
+}
+
+/// Paths systemd-tmpfiles will create, read from the running configuration
+/// rather than written down.
+fn tmpfiles_paths() -> Vec<String> {
+    use std::sync::OnceLock;
+    static CACHE: OnceLock<Vec<String>> = OnceLock::new();
+    CACHE
+        .get_or_init(|| {
+            let Some(out) = output("systemd-tmpfiles", &["--cat-config"]) else {
+                return Vec::new();
+            };
+            out.lines()
+                .filter(|l| !l.trim_start().starts_with('#') && !l.trim().is_empty())
+                .filter_map(|l| {
+                    let mut f = l.split_whitespace();
+                    let kind = f.next()?;
+                    // Only the types that bring a path into existence.
+                    if !matches!(
+                        kind.trim_end_matches(['!', '-', '=', '+', '^']),
+                        "d" | "D" | "v" | "f" | "F" | "L" | "C"
+                    ) {
+                        return None;
+                    }
+                    f.next().map(str::to_string)
+                })
+                .collect()
+        })
+        .clone()
+}
+
+/// Everything on the root that will not survive the next boot.
+///
+/// Walks the root filesystem rather than a list of directories somebody
+/// thought of, and stays on it: anything with a different device id is on
+/// another filesystem and is not the root's to lose. That single test excludes
+/// /boot, /nix, /persist, the pseudo-filesystems and every bind mount out of
+/// the persist subvolume, because btrfs gives each subvolume its own id.
+///
+/// What remains is filtered by one more property rather than by name: a
+/// symlink into the store is rebuilt at activation and costs nothing, while a
+/// real file is something a program wrote. That is what surfaces /etc/shadow
+/// without anybody having thought of /etc.
+fn collect_ephemeral_loss(declared: &[String], out: &mut Vec<String>) {
+    use std::os::unix::fs::MetadataExt;
+
+    let Ok(root_meta) = fs::metadata("/") else { return };
+    let root_dev = root_meta.dev();
+
+    let mut stack = vec![(std::path::PathBuf::from("/"), 0usize)];
+    while let Some((dir, depth)) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for e in entries.filter_map(Result::ok) {
+            let path = e.path();
+            let p = path.to_string_lossy().to_string();
+
+            if declared.iter().any(|d| p == *d || p.starts_with(&format!("{d}/"))) {
+                continue;
+            }
+            if regenerated(&p) {
+                continue;
+            }
+            let Ok(meta) = fs::symlink_metadata(&path) else { continue };
+
+            // Another filesystem: not on the root, so not lost with it.
+            if meta.dev() != root_dev {
+                continue;
+            }
+            // Regenerated at activation from the store.
+            if meta.is_symlink() {
+                continue;
+            }
+
+            if meta.is_dir() {
+                if depth < 3 {
+                    stack.push((path, depth + 1));
+                } else {
+                    out.push(p);
+                }
+            } else if meta.is_file() {
+                out.push(p);
+            }
         }
     }
 }
+
+/// Whether a stored hash is still the installer's default.
+/// Whether somebody has run `passwd` on a machine where it does nothing.
+///
+
+/// Whether the root was actually wiped this boot.
+///
+/// Only meaningful on a machine with an ephemeral root, and the reason it
+/// exists is that the failure is silent in the direction that looks healthy:
+/// if the initrd rollback does not run, nothing is wiped, everything
+/// persists, and the machine behaves perfectly well while quietly
+/// accumulating exactly the state it was set up to discard.
+///
+
+
+/// Everything on the root that will not survive the next boot.
+///
+
+
 
 /// What would be lost if the root filesystem were wiped.
 ///
@@ -715,44 +843,20 @@ fn unpersisted_state() -> Finding {
     // look. /etc is mostly store symlinks; the unmanaged files there are a
     // separate question and a noisier one.
     let mut unlisted: Vec<String> = Vec::new();
-    if let Ok(entries) = fs::read_dir("/var/lib") {
-        for e in entries.filter_map(Result::ok) {
-            let path = e.path();
-            if !path.is_dir() {
-                continue;
-            }
-            let p = path.to_string_lossy().to_string();
-            // A prefix match, so declaring /var/lib/systemd covers what is
-            // under it.
-            if !declared.iter().any(|d| p == *d || p.starts_with(&format!("{d}/"))) {
-                unlisted.push(p);
-            }
-        }
-    }
-    unlisted.sort();
 
-    if unlisted.is_empty() {
-        return Finding::new(Level::Ok, "all /var/lib and home state is declared");
-    }
+    // What gets destroyed is not a list of directories to check. It is
+    // everything on the root subvolume that is not bound out of /persist -
+    // the blank snapshot is empty, so the root's entire contents are
+    // destined for deletion.
+    //
+    // The filter is therefore not "which places are interesting" but "which
+    // of those will not come back". A symlink into the store is rebuilt at
+    // activation and costs nothing; a real file is something a program wrote.
+    // That rule finds /etc/shadow without anybody having thought of /etc,
+    // which is the point - the previous version scanned three hardcoded
+    // directories and was blind to the one that mattered.
+    collect_ephemeral_loss(&declared, &mut unlisted);
 
-    // Home paths are declared relative to the user's home, so resolve them
-    // before comparing - otherwise every one of them looks undeclared.
-    let mut declared = declared;
-    if let (Some(home), Some(dirs)) = (home_dir(), list.get("userDirectories").and_then(|v| v.as_array()))
-    {
-        for d in dirs.iter().filter_map(|v| v.as_str()) {
-            declared.push(home.join(d).to_string_lossy().to_string());
-        }
-    }
-
-    // Home too, and this is the half that matters most. /var/lib holds
-    // service state that is mostly disposable; home holds the things whose
-    // loss is actually felt, and it is the largest source of state nothing
-    // declared. Keeping it whole exempts it from the discipline, so at least
-    // report what is in there.
-    if let Some(home) = home_dir() {
-        collect_undeclared(&home, &declared, 0, &mut unlisted);
-    }
     unlisted.sort();
 
     let shown: Vec<String> = unlisted.iter().take(12).cloned().collect();
@@ -767,7 +871,7 @@ fn unpersisted_state() -> Finding {
     // decision for you whether you meant it or not.
     Finding::new(
         Level::Warn,
-        format!("{} paths in /var/lib and home are not declared", unlisted.len()),
+        format!("{} paths on the root will not survive a reboot", unlisted.len()),
     )
     .detail(detail)
     .remedy("decide which matter and add them to kiwami.persist.directories")
