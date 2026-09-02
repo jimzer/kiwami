@@ -22,6 +22,10 @@
   # type a password at a greeter.
   kiwami.autoLogin = true;
 
+  # Predates the ephemeral layout and still has a single ext4 root. Not a
+  # supported mode - converting these is follow-up work.
+  kiwami.ephemeralRoot = false;
+
   networking.hostName = "kiwami-vm-x86";
 
   boot.loader.systemd-boot.enable = true;

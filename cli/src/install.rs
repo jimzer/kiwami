@@ -760,6 +760,10 @@ fn scaffold_host(host_dir: &Path, name: &str) -> Result<(), String> {
   # bar, because everything was installed for a different account.
   kiwami.user = "{user}";
 
+  # The root is wiped at every boot; only what kiwami.persist declares
+  # survives. disk.nix beside this makes the subvolumes that depend on.
+  kiwami.ephemeralRoot = true;
+
   # Log the desktop user in with no password. Off deliberately: it suits a
   # throwaway VM and not a laptop, where it means whoever opens the lid is
   # you. Uncomment only if you know that is what you want.
@@ -926,6 +930,7 @@ pub struct Layout {
     home: Option<PathBuf>,
     encrypt: bool,
     hibernate: bool,
+    ephemeral: bool,
 }
 
 /// The four questions, and only these four. Each one is irreversible: every
@@ -966,7 +971,22 @@ fn ask_layout(all: &[Disk], system: &Disk) -> Result<Layout, String> {
     .map_err(|e| e.to_string())?
     .eq_ignore_ascii_case("y");
 
-    Ok(Layout { system: system.path.clone(), home, encrypt, hibernate })
+    // Not asked. Every machine this installs is ephemeral: the root is wiped
+    // at each boot and only what the config declares survives. Offering the
+    // alternative would mean two layouts, two sets of assumptions about where
+    // state lives, and a class of bug that only appears on one of them - which
+    // is exactly what was found the first time the installer wrote persisted
+    // state onto a root that was about to be discarded.
+    let ephemeral = true;
+
+    if hibernate {
+        return Err("hibernation is not generated yet: the swap area would have to live\n\
+                    inside the same btrfs the root is rolled back in, which has not been\n\
+                    tested. Say no to hibernation, or write disk.nix by hand."
+            .into());
+    }
+
+    Ok(Layout { system: system.path.clone(), home, encrypt, hibernate, ephemeral })
 }
 
 /// Aliases that identify a drive by number rather than by what it is.
@@ -1080,6 +1100,47 @@ fn esp() -> Field {
     )
 }
 
+/// The btrfs tree an ephemeral root needs: the wiped subvolume, the store, and
+/// the warehouse everything declared is bound out of.
+///
+/// A blank snapshot of @root is taken in a postCreateHook, which is the one
+/// moment @root is empty - disko has just made it and nixos-install has not
+/// run. Taken later, "blank" would contain an entire system.
+fn ephemeral_btrfs(inner_of: Option<&str>) -> Nix {
+    let subvol = |mount: &str| {
+        nix::attrs(vec![
+            field("mountpoint", s(mount)),
+            field("mountOptions", Nix::List(vec![s("compress=zstd"), s("noatime")])),
+        ])
+    };
+    let hook = match inner_of {
+        // Inside LUKS the filesystem is on the mapper device, not the
+        // partition, so the hook has to open it the way disko just did.
+        Some(name) => format!(
+            "MNTPOINT=$(mktemp -d)\n             mount \"/dev/mapper/{name}\" \"$MNTPOINT\" -o subvol=/\n             trap 'umount \"$MNTPOINT\"; rm -rf \"$MNTPOINT\"' EXIT\n             btrfs subvolume snapshot -r \"$MNTPOINT/@root\" \"$MNTPOINT/@root-blank\"\n"
+        ),
+        None => "MNTPOINT=$(mktemp -d)\n                 mount \"$device\" \"$MNTPOINT\" -o subvol=/\n                 trap 'umount \"$MNTPOINT\"; rm -rf \"$MNTPOINT\"' EXIT\n                 btrfs subvolume snapshot -r \"$MNTPOINT/@root\" \"$MNTPOINT/@root-blank\"\n"
+            .to_string(),
+    };
+    nix::attrs(vec![
+        field("type", s("btrfs")),
+        field("extraArgs", Nix::List(vec![s("-f")])),
+        field(
+            "subvolumes",
+            nix::attrs(vec![
+                field("\"@root\"", subvol("/")),
+                field("\"@nix\"", subvol("/nix")),
+                noted(
+                    "\"@persist\"",
+                    "Everything declared is bound out of here, including the home\npaths - so this is what to snapshot or back up.",
+                    subvol("/persist"),
+                ),
+            ]),
+        ),
+        field("postCreateHook", Nix::Raw(format!("''\n{hook}          ''"))),
+    ])
+}
+
 fn render_disk_nix(l: &Layout) -> Result<String, String> {
     let system = stable_device(&l.system)?;
     let mut devices: Vec<Field> = Vec::new();
@@ -1133,7 +1194,14 @@ fn render_disk_nix(l: &Layout) -> Result<String, String> {
                 "root",
                 nix::attrs(vec![
                     field("size", s("100%")),
-                    field("content", luks("cryptroot", fs_content("/"), vec![])),
+                    field(
+                        "content",
+                        if l.ephemeral {
+                            luks("cryptroot", ephemeral_btrfs(Some("cryptroot")), vec![])
+                        } else {
+                            luks("cryptroot", fs_content("/"), vec![])
+                        },
+                    ),
                 ]),
             )],
             None,
@@ -1157,7 +1225,13 @@ fn render_disk_nix(l: &Layout) -> Result<String, String> {
         (false, false) => (
             vec![field(
                 "root",
-                nix::attrs(vec![field("size", s("100%")), field("content", fs_content("/"))]),
+                nix::attrs(vec![
+                    field("size", s("100%")),
+                    field(
+                        "content",
+                        if l.ephemeral { ephemeral_btrfs(None) } else { fs_content("/") },
+                    ),
+                ]),
             )],
             None,
         ),

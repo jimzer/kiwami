@@ -70,14 +70,23 @@ in
 
     ephemeralRoot = mkOption {
       type = types.bool;
-      default = false;
+      default = true;
       description = ''
         Wipe the root filesystem at every boot, keeping only what
         kiwami.persist declares.
 
-        Requires a disk layout with @root, @nix and @persist subvolumes and a
+        On by default: every machine `kiwami install` creates is ephemeral,
+        and the installer does not offer the alternative. Two layouts would
+        mean two sets of assumptions about where state lives and a class of
+        bug that only shows up on one of them.
+
+        It remains an option only because three harness hosts predate it and
+        still have a single ext4 root. They set it false explicitly; converting
+        them is follow-up work, not a supported mode.
+
+        Requires a layout with @root, @nix and @persist subvolumes and a
         @root-blank snapshot to restore from, so it cannot simply be switched
-        on for a machine that was installed without one.
+        on for a machine installed without one.
       '';
     };
 
