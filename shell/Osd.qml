@@ -11,8 +11,8 @@ import QtQuick
 // path for volume, and it also shows when something else changes it.
 //
 // Brightness cannot work that way: sysfs emits neither inotify nor udev events
-// when the backlight changes, so there is nothing to watch. The keybind
-// touches a marker instead and this reads the value when it moves.
+// when the backlight changes, so there is nothing to watch. The keybind writes
+// a marker on tmpfs instead and this reads the backlight when the marker moves.
 //
 // The brightness half went missing for a long time: this comment described it,
 // the keybinds called brightnessctl, and nothing here watched the backlight.
@@ -96,9 +96,14 @@ PanelWindow {
     }
 
     FileView {
-        // The marker the keybind touches. sysfs cannot be watched - it emits
+        // The marker the keybind writes. sysfs cannot be watched - it emits
         // no inotify events and no udev events, both measured - so the shell
         // is told a change happened and then reads the value.
+        //
+        // Two things had to be true before this fired: the file must exist
+        // when the watch is set up (see init below), and each write must
+        // change the content - FileView compares content, so touching an
+        // empty file looks like nothing happened.
         //
         // The cost is that a brightness change from somewhere else, like
         // auto-dimming, shows no OSD. That is the honest trade for not polling
