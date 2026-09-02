@@ -8,8 +8,11 @@ import QtQuick
 //
 // It reacts to state changing rather than being told to appear: the keybinds
 // just run wpctl or brightnessctl, and this watches the result. One less IPC
-// path, and it also shows when something else changes them - a laptop's own
-// function keys, or the auto-dimming that happens on battery.
+// path for volume, and it also shows when something else changes it.
+//
+// Brightness cannot work that way: sysfs emits neither inotify nor udev events
+// when the backlight changes, so there is nothing to watch. The keybind
+// touches a marker instead and this reads the value when it moves.
 //
 // The brightness half went missing for a long time: this comment described it,
 // the keybinds called brightnessctl, and nothing here watched the backlight.
@@ -89,9 +92,20 @@ PanelWindow {
     FileView {
         id: backlight
         path: root.backlightDir ? root.backlightDir + "/brightness" : ""
-        watchChanges: true
         onLoaded: root.onBrightness(parseInt(text()))
-        onFileChanged: reload()
+    }
+
+    FileView {
+        // The marker the keybind touches. sysfs cannot be watched - it emits
+        // no inotify events and no udev events, both measured - so the shell
+        // is told a change happened and then reads the value.
+        //
+        // The cost is that a brightness change from somewhere else, like
+        // auto-dimming, shows no OSD. That is the honest trade for not polling
+        // sysfs five times a second on a laptop.
+        path: (Quickshell.env("XDG_RUNTIME_DIR") || "/run/user/1000") + "/kiwami-brightness"
+        watchChanges: true
+        onFileChanged: backlight.reload()
     }
 
     property string backlightDir: ""

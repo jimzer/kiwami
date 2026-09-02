@@ -61,8 +61,15 @@ hl.bind(mod .. " + SHIFT + P", hl.dsp.global("kiwami:power"))
 hl.bind("XF86AudioRaiseVolume", hl.dsp.exec_cmd("wpctl set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+"), { repeating = true })
 hl.bind("XF86AudioLowerVolume", hl.dsp.exec_cmd("wpctl set-volume @DEFAULT_AUDIO_SINK@ 5%-"), { repeating = true })
 hl.bind("XF86AudioMute", hl.dsp.exec_cmd("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"))
-hl.bind("XF86MonBrightnessUp", hl.dsp.exec_cmd("brightnessctl set +5%"), { repeating = true })
-hl.bind("XF86MonBrightnessDown", hl.dsp.exec_cmd("brightnessctl set 5%-"), { repeating = true })
+-- Brightness leaves a marker the shell can watch. sysfs reports changes through
+-- neither inotify nor udev - both were measured returning nothing - so the OSD
+-- has no way to notice a backlight write on its own. The marker lives on a
+-- tmpfs, where inotify does work.
+local brightness = "brightnessctl set %s && touch \"$XDG_RUNTIME_DIR/kiwami-brightness\""
+hl.bind("XF86MonBrightnessUp",
+  hl.dsp.exec_cmd("sh -c '" .. string.format(brightness, "+5%%") .. "'"), { repeating = true })
+hl.bind("XF86MonBrightnessDown",
+  hl.dsp.exec_cmd("sh -c '" .. string.format(brightness, "5%%-") .. "'"), { repeating = true })
 
 -- Workspaces
 for i = 1, 9 do
