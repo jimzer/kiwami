@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# ssh to a tailnet machine, and say why when it will not connect.
+#
+# Tailscale SSH in `check` mode prints a login URL and then waits for it to be
+# visited. Under BatchMode with a long timeout that looks exactly like a hang,
+# which cost an evening of blaming the machine: the message was on the wire the
+# whole time and nothing was reading it.
+#
+# So: short timeout, no BatchMode, and surface what the server actually said.
+set -uo pipefail
+
+host="${1:-}"
+shift || true
+[[ -n "$host" ]] || { echo "usage: tsh <user@host> [command...]"; exit 1; }
+
+out=$(ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+          -o LogLevel=ERROR -o ConnectTimeout=5 -o ServerAliveInterval=3 -o ServerAliveCountMax=2 \
+          "$host" "$@" 2>&1)
+status=$?
+
+if grep -q "additional check" <<<"$out"; then
+  url=$(grep -oE 'https://login\.tailscale\.com/a/[a-z0-9]+' <<<"$out" | head -1)
+  echo "Tailscale wants you to re-authenticate before this connection works."
+  echo "This is normal: the tailnet policy uses 'check', which expires."
+  echo
+  echo "  $url"
+  echo
+  echo "Visit it, then run this again."
+  exit 75   # EX_TEMPFAIL: not broken, just waiting for a human
+fi
+
+if grep -q "tailnet policy does not permit" <<<"$out"; then
+  echo "The tailnet ACL refuses this username on that machine:"
+  grep "does not permit" <<<"$out"
+  exit 77   # EX_NOPERM
+fi
+
+printf '%s\n' "$out"
+exit $status
