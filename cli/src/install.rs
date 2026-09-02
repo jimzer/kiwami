@@ -1328,7 +1328,7 @@ fn make_keyfile() -> Result<(), String> {
 
 /// Put the key on the installed system, where every later boot needs it.
 fn install_keyfile() -> Result<(), String> {
-    let target = PathBuf::from("/mnt").join(KEYFILE.trim_start_matches('/'));
+    let target = target_state_path(KEYFILE);
     let dir = target.parent().ok_or("bad key path")?;
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     fs::copy(KEYFILE, &target).map_err(|e| e.to_string())?;
@@ -1401,6 +1401,26 @@ fn clone_flake(flake: &str, assume_yes: bool) -> Result<PathBuf, String> {
     Ok(dest)
 }
 
+///
+/// With an ephemeral root, anything the installer writes into /mnt is on the
+/// subvolume that gets wiped - and if the path is also declared as persisted,
+/// the first boot deletes it and then masks it with an empty bind mount from
+/// /persist. Declaring a path makes writing it to the root strictly worse
+/// than not declaring it at all.
+///
+/// So state goes to /mnt/persist/<path> when the target has a /persist, and
+/// to /mnt/<path> when it does not. Detected by looking rather than by asking
+/// the config: /persist being mounted is the fact that matters.
+fn target_state_path(rel: &str) -> PathBuf {
+    let rel = rel.trim_start_matches('/');
+    let persist = Path::new("/mnt/persist");
+    if persist.is_dir() {
+        persist.join(rel)
+    } else {
+        PathBuf::from("/mnt").join(rel)
+    }
+}
+
 /// The normal users a host declares, straight from its own configuration.
 fn target_users(flake: &str, host: &str) -> Vec<String> {
     let out = Command::new("nix")
@@ -1420,6 +1440,14 @@ fn target_users(flake: &str, host: &str) -> Vec<String> {
     }
 }
 
+/// The uid a user will have on the installed system, read from its passwd.
+fn target_uid(user: &str) -> Option<u32> {
+    fs::read_to_string("/mnt/etc/passwd").ok()?.lines().find_map(|l| {
+        let mut f = l.split(':');
+        (f.next()? == user).then(|| f.nth(1)?.parse().ok())?
+    })
+}
+
 /// Put the flake on the installed system.
 ///
 /// Without this the machine boots - the configuration was baked into the
@@ -1434,7 +1462,7 @@ fn place_checkout(repo: &Path, flake: &str, host: &str) -> Result<(), String> {
         return copy_into(repo, Path::new("/mnt/root/kiwami"), "root");
     }
     for user in &users {
-        let dest = PathBuf::from("/mnt/home").join(user).join("kiwami");
+        let dest = target_state_path(&format!("home/{user}/kiwami"));
         copy_into(repo, &dest, user)?;
         println!("    ~{user}/kiwami");
     }
@@ -1447,11 +1475,21 @@ fn copy_into(repo: &Path, dest: &Path, owner: &str) -> Result<(), String> {
     // machine arrives with an untracked tree that no flake command will read.
     run("cp", &["-a", &format!("{}/.", repo.display()), &dest.to_string_lossy()])?;
 
-    let inside = dest.to_string_lossy().replace("/mnt", "");
-    run(
-        "nixos-enter",
-        &["--root", "/mnt", "--", "chown", "-R", &format!("{owner}:users"), &inside],
-    )
+    // chown by numeric id rather than through nixos-enter: with an ephemeral
+    // root the destination is under /mnt/persist, which has no meaning inside
+    // the target's namespace - the path only exists as a bind mount that has
+    // not happened yet.
+    let uid = target_uid(owner).unwrap_or(1000);
+    let mut stack = vec![dest.to_path_buf()];
+    while let Some(p) = stack.pop() {
+        let _ = std::os::unix::fs::chown(&p, Some(uid), Some(100));
+        if p.is_dir() {
+            if let Ok(entries) = fs::read_dir(&p) {
+                stack.extend(entries.filter_map(|e| e.ok()).map(|e| e.path()));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Put the new system first in the firmware's boot order.
@@ -1554,7 +1592,8 @@ fn carry_network_state() -> Result<(), String> {
         .map(|d| d.filter_map(|e| e.ok()).map(|e| e.path()).collect())
         .unwrap_or_default();
     if !saved.is_empty() {
-        let dest = Path::new("/mnt/etc/NetworkManager/system-connections");
+        let dest = target_state_path("etc/NetworkManager/system-connections");
+        let dest = dest.as_path();
         fs::create_dir_all(dest).map_err(|e| e.to_string())?;
         for f in &saved {
             run("cp", &["-a", &f.to_string_lossy(), &dest.to_string_lossy()])?;
@@ -1568,7 +1607,8 @@ fn carry_network_state() -> Result<(), String> {
     // rather than done quietly.
     let state = Path::new("/var/lib/tailscale/tailscaled.state");
     if state.exists() {
-        let dest = Path::new("/mnt/var/lib/tailscale");
+        let dest = target_state_path("var/lib/tailscale");
+        let dest = dest.as_path();
         fs::create_dir_all(dest).map_err(|e| e.to_string())?;
         run("cp", &["-a", &state.to_string_lossy(), &dest.to_string_lossy()])?;
         println!(

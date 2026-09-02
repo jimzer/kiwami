@@ -68,6 +68,19 @@ in
       '';
     };
 
+    ephemeralRoot = mkOption {
+      type = types.bool;
+      default = false;
+      description = ''
+        Wipe the root filesystem at every boot, keeping only what
+        kiwami.persist declares.
+
+        Requires a disk layout with @root, @nix and @persist subvolumes and a
+        @root-blank snapshot to restore from, so it cannot simply be switched
+        on for a machine that was installed without one.
+      '';
+    };
+
     persist = {
       directories = mkOption {
         type = types.listOf types.str;
@@ -90,6 +103,20 @@ in
         default = [ ];
         description = "Individual files that must survive, e.g. host keys.";
         example = [ "/etc/machine-id" ];
+      };
+
+      userDirectories = mkOption {
+        type = types.listOf types.str;
+        default = [ "kiwami" ".ssh" ];
+        description = ''
+          Paths under the desktop user's home that must survive, relative to
+          it. They are stored in /persist/home/<user> and bound back.
+
+          The default is not decoration: with an ephemeral root, home is wiped
+          too, and ~/kiwami is the flake the machine rebuilds itself from. A
+          machine that wipes its own configuration on first reboot is one you
+          can no longer change.
+        '';
       };
     };
 

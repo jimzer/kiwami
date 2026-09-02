@@ -43,7 +43,11 @@ step "booting installer ISO"
 "$DIR/start-vm.sh" install headless
 
 step "waiting for installer shell"
-TIMEOUT=240 $CONSOLE expect 'nixos@nixos' >/dev/null || { echo "installer never came up"; exit 1; }
+# Generous, because the image copies itself into RAM before starting. That is
+# a deliberate trade - it stops a flaky USB link killing the install - but it
+# moves first boot from seconds to minutes, and the old 240s timeout started
+# failing on a machine that was booting perfectly well.
+TIMEOUT=600 $CONSOLE expect 'nixos@nixos' >/dev/null || { echo "installer never came up"; exit 1; }
 $CONSOLE send 'sudo -i' >/dev/null; sleep 1
 
 step "pushing the flake to the installer"
@@ -127,7 +131,13 @@ $CONSOLE run 'grep -q "installation finished" /tmp/install.log' >/dev/null || {
 step "seeding ssh key"
 [[ -f "$KEY" ]] || ssh-keygen -t ed25519 -N '' -C kiwami-vm -f "$KEY" >/dev/null
 PUB=$(cat "$KEY.pub")
-$CONSOLE run "mkdir -p /mnt/home/nixos/.ssh && echo '$PUB' > /mnt/home/nixos/.ssh/authorized_keys && chmod 700 /mnt/home/nixos/.ssh && chmod 600 /mnt/home/nixos/.ssh/authorized_keys && nixos-enter --root /mnt -- chown -R nixos:users /home/nixos/.ssh" >/dev/null
+# Into /persist when the target has one. An ephemeral root wipes /home on the
+# first boot, and ~/.ssh is a declared path - so a key written to the root is
+# deleted and then masked by an empty bind mount, which is strictly worse than
+# not declaring it. The machine boots and refuses every connection.
+$CONSOLE run "if [ -d /mnt/persist ]; then D=/mnt/persist/home/nixos/.ssh; else D=/mnt/home/nixos/.ssh; fi; \
+  mkdir -p \"\$D\" && echo '$PUB' > \"\$D/authorized_keys\" && chmod 700 \"\$D\" && chmod 600 \"\$D/authorized_keys\" && \
+  chown -R 1000:100 \"\$(dirname \"\$D\")\"" >/dev/null
 
 # The boot order is corrected by `kiwami install` itself now. It used to
 # happen here, which is why the installer's silence went unnoticed: every VM

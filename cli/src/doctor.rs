@@ -509,6 +509,18 @@ fn sort_list_literal(line: &str) -> String {
     format!("{}[ {} ]{}", &line[..open], items.join(" "), &line[close + 1..])
 }
 
+/// The invoking user's home, even under sudo - doctor needs root for most of
+/// what it reads, and root's home is not the one whose state matters.
+fn home_dir() -> Option<std::path::PathBuf> {
+    if let Some(user) = std::env::var_os("SUDO_USER") {
+        let p = std::path::PathBuf::from("/home").join(user);
+        if p.is_dir() {
+            return Some(p);
+        }
+    }
+    std::env::var_os("HOME").map(std::path::PathBuf::from).filter(|p| p.is_dir())
+}
+
 /// What would be lost if the root filesystem were wiped.
 ///
 /// Not a wipe, and nothing here changes anything: the point is to answer
@@ -552,8 +564,25 @@ fn unpersisted_state() -> Finding {
     unlisted.sort();
 
     if unlisted.is_empty() {
-        return Finding::new(Level::Ok, "all /var/lib state is declared");
+        return Finding::new(Level::Ok, "all /var/lib and home state is declared");
     }
+
+    // Home too, and this is the half that matters most. /var/lib holds
+    // service state that is mostly disposable; home holds the things whose
+    // loss is actually felt, and it is the largest source of state nothing
+    // declared. Keeping it whole exempts it from the discipline, so at least
+    // report what is in there.
+    if let Some(home) = home_dir() {
+        if let Ok(entries) = fs::read_dir(&home) {
+            for e in entries.filter_map(Result::ok) {
+                let p = e.path().to_string_lossy().to_string();
+                if !declared.iter().any(|d| p == *d || p.starts_with(&format!("{d}/"))) {
+                    unlisted.push(p);
+                }
+            }
+        }
+    }
+    unlisted.sort();
 
     let shown: Vec<String> = unlisted.iter().take(12).cloned().collect();
     let more = unlisted.len().saturating_sub(shown.len());
@@ -567,7 +596,7 @@ fn unpersisted_state() -> Finding {
     // decision for you whether you meant it or not.
     Finding::new(
         Level::Warn,
-        format!("{} directories in /var/lib are not declared", unlisted.len()),
+        format!("{} paths in /var/lib and home are not declared", unlisted.len()),
     )
     .detail(detail)
     .remedy("decide which matter and add them to kiwami.persist.directories")

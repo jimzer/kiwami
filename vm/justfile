@@ -80,6 +80,11 @@ start-iso-test:
 luks-test: fetch-iso
     ./scripts/luks-test.sh
 
+# Install an ephemeral-root machine on its own disk and prove the root is
+# actually wiped: a rollback that silently does nothing also boots.
+ephemeral-test: fetch-iso
+    ./scripts/ephemeral-test.sh
+
 # Run the installer test matrix (needs start-test-disks)
 install-test:
     @./scripts/install-test.sh

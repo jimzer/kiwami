@@ -17,6 +17,12 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
+    # Bind-mounts declared paths back over an ephemeral root. Hand-rolling
+    # this is where impermanence setups go subtly wrong - directories that
+    # need creating first, files that cannot be bind-mounted onto nothing,
+    # ownership that has to survive - so the well-solved version is used.
+    impermanence.url = "github:nix-community/impermanence";
+
     # The desktop shell. Pinned deliberately: Quickshell is alpha and ships
     # breaking QML API changes, so it must move when we say so, not when a
     # distro packager pushes.
@@ -223,6 +229,7 @@
           ./modules/options.nix
           ./modules/themes.nix
           ./modules/generated.nix
+          ./modules/impermanence.nix
         ];
 
         # Modules reach the flake's own inputs (the kiwami package, quickshell)
