@@ -258,31 +258,55 @@ cmd_test() {
     ip="$(server_ip "$id")"
     user="$(install_field "$id" user)"; user="${user:-ubuntu}"
     ssh-keygen -R "$ip" >/dev/null 2>&1 || true
-
-    # accept-new every time, because the line above just forgot the key. The
-    # forgetting is deliberate - rented addresses are recycled and the key
-    # changes when the OS is installed - but dropping it without accepting the
-    # replacement just fails closed, which is how the first remote test run
-    # died before it started.
     local SSHOPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15)
 
-    local what="${1:-}"
+    local what="${1:-all}"
     local flake="${KIWAMI_CLOUD_FLAKE:-github:jimzer/kiwami}"
+    local log="/tmp/kiwami-test-$what.log"
 
-    # The flake is fetched from GitHub rather than pushed. Whatever is on the
-    # builder is then exactly what CI and a real install would get, and there
-    # is no copy step to go stale - which is how the last harness managed to
-    # test an ISO that predated the fix it was testing.
-    if [ -n "$what" ]; then
-        cyan "==> running checks.$what from $flake"
-        ssh "${SSHOPTS[@]}" "$user@$ip" \
-            ". /etc/profile.d/nix.sh 2>/dev/null || . ~/.nix-profile/etc/profile.d/nix.sh; \
-             nix build --no-link --print-build-logs '$flake#checks.x86_64-linux.$what'"
+    # The flake is fetched from GitHub rather than pushed. What the builder
+    # tests is then exactly what CI and a real install would get, with no copy
+    # step to go stale - which is how the old harness came to test an ISO that
+    # predated the fix under test.
+    local build
+    if [ "$what" = "all" ]; then
+        build="nix flake check --print-build-logs '$flake'"
     else
-        cyan "==> running every check from $flake"
-        ssh "${SSHOPTS[@]}" "$user@$ip" \
-            ". /etc/profile.d/nix.sh 2>/dev/null || . ~/.nix-profile/etc/profile.d/nix.sh; \
-             nix flake check --print-build-logs '$flake'"
+        build="nix build --no-link --print-build-logs '$flake#checks.x86_64-linux.$what'"
+    fi
+
+    # Detached, writing to a log on the builder. These runs are minutes long
+    # and a dropped ssh would otherwise take the output with it - the build
+    # keeps going, invisibly, and the next run collides with it.
+    cyan "==> $what, on $ip"
+    ssh "${SSHOPTS[@]}" "$user@$ip" "
+        pkill -f 'nix build --no-link' 2>/dev/null || true
+        rm -f '$log'
+        setsid bash -c '. /etc/profile.d/nix.sh 2>/dev/null; { $build; echo \"KIWAMI_EXIT=\$?\"; } > $log 2>&1' </dev/null >/dev/null 2>&1 &
+        sleep 1; echo started"
+
+    # Follow it. Reconnecting each time rather than holding one long ssh, so a
+    # network blip costs a few seconds of output rather than the whole run.
+    local seen=0 total exit_line
+    while true; do
+        total="$(ssh "${SSHOPTS[@]}" "$user@$ip" "wc -l < $log 2>/dev/null || echo 0")"
+        total="${total//[^0-9]/}"; total="${total:-0}"
+        if [ "$total" -gt "$seen" ]; then
+            ssh "${SSHOPTS[@]}" "$user@$ip" "tail -n +$((seen + 1)) $log | head -n $((total - seen))"
+            seen="$total"
+        fi
+        exit_line="$(ssh "${SSHOPTS[@]}" "$user@$ip" "grep -m1 '^KIWAMI_EXIT=' $log 2>/dev/null || true")"
+        [ -n "$exit_line" ] && break
+        sleep 20
+    done
+
+    local code="${exit_line#KIWAMI_EXIT=}"
+    echo
+    if [ "$code" = "0" ]; then
+        printf '\033[1;32m==> %s passed\033[0m\n' "$what"
+    else
+        printf '\033[1;31m==> %s failed (exit %s)\033[0m\n' "$what" "$code"
+        return 1
     fi
 }
 
