@@ -21,7 +21,16 @@ Text {
     property var status: null
     property bool configured: false
 
+    // Bindings re-evaluate when a property they read changes, and Date.now()
+    // is not a property - so without something reactive in here the age is
+    // computed once and never again. It said "just now" ten minutes after a
+    // backup, correctly, and would have said "just now" a week later too:
+    // the one thing this widget exists to report is the one thing it could
+    // never have shown.
+    property int tick: 0
+
     readonly property real ageHours: {
+        tick;   // read, so the timer below re-runs this
         if (!status || !status.time) return -1;
         const then = new Date(status.time);
         if (isNaN(then.getTime())) return -1;
@@ -72,6 +81,6 @@ Text {
         interval: 60000
         running: true
         repeat: true
-        onTriggered: root.ageHoursChanged()
+        onTriggered: root.tick++
     }
 }
