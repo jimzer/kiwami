@@ -34,6 +34,15 @@
   # you. Uncomment only if you know that is what you want.
   # kiwami.autoLogin = true;
 
+  # /persist, encrypted, in R2. The prefix is what keeps one bucket usable for
+  # more than this machine: another host would be .../kiwami-<name> and a
+  # separate repository with its own passphrase, sharing nothing. restic has
+  # no per-host permissions inside a repository, so separate is the safer
+  # default even between machines you own.
+  kiwami.backup.enable = true;
+  kiwami.backup.repository =
+    "s3:https://4e11898df61f8103785b672c02504096.r2.cloudflarestorage.com/kiwami-backups/kiwami-xps";
+
   boot.loader.systemd-boot.enable = true;
   # Without this systemd-boot never registers an NVRAM entry and the firmware
   # boots something else, or nothing.
