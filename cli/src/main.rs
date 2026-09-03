@@ -7,6 +7,7 @@ mod net;
 mod nix;
 mod remote;
 mod passwd;
+mod snapshot;
 mod paths;
 mod theme;
 
@@ -81,6 +82,11 @@ enum Cmd {
         #[arg(long)]
         login: bool,
     },
+    /// Back /persist up, and put it back
+    Snapshot {
+        #[command(subcommand)]
+        action: SnapshotCmd,
+    },
     /// This machine's entry in the flake
     Host {
         #[command(subcommand)]
@@ -91,6 +97,35 @@ enum Cmd {
         /// Currently the only supported format; present so the shape is explicit.
         #[arg(long, default_value_t = true)]
         json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum SnapshotCmd {
+    /// Point this machine at a repository, generating a passphrase if it is
+    /// new, and prove a backup can be written and read back.
+    Setup {
+        /// The restic repository. Prompts if omitted.
+        #[arg(long)]
+        repository: Option<String>,
+    },
+    /// Take a backup now, through the same unit the timer uses
+    Backup,
+    /// What is in the repository
+    Status,
+    /// Put /persist back from the newest snapshot
+    Restore {
+        /// Where to write it. /persist on a running machine; /mnt/persist
+        /// from the installer, before the first boot.
+        #[arg(long, default_value = "/")]
+        target: String,
+        /// Only what the machine needs to come up as itself - wifi, keys,
+        /// the tailnet node, the gh token. The rest can follow later.
+        #[arg(long)]
+        identity: bool,
+        /// Skip the confirmation
+        #[arg(long)]
+        yes: bool,
     },
 }
 
@@ -186,6 +221,32 @@ fn main() -> std::process::ExitCode {
                 return std::process::ExitCode::FAILURE;
             }
         }
+        Cmd::Snapshot { action } => match action {
+            SnapshotCmd::Setup { repository } => {
+                if let Err(e) = snapshot::setup(repository) {
+                    eprintln!("snapshot setup: {e}");
+                    return std::process::ExitCode::FAILURE;
+                }
+            }
+            SnapshotCmd::Backup => {
+                if let Err(e) = snapshot::backup() {
+                    eprintln!("snapshot backup: {e}");
+                    return std::process::ExitCode::FAILURE;
+                }
+            }
+            SnapshotCmd::Status => {
+                if let Err(e) = snapshot::status() {
+                    eprintln!("snapshot status: {e}");
+                    return std::process::ExitCode::FAILURE;
+                }
+            }
+            SnapshotCmd::Restore { target, identity, yes } => {
+                if let Err(e) = snapshot::restore(target, identity, yes) {
+                    eprintln!("snapshot restore: {e}");
+                    return std::process::ExitCode::FAILURE;
+                }
+            }
+        },
         Cmd::Host { action } => match action {
             HostCmd::Push { name, no_pr } => {
                 if let Err(e) = host::push(name, no_pr) {

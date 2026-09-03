@@ -120,6 +120,7 @@
           ./modules/themes.nix
           ./modules/generated.nix
           ./modules/impermanence.nix
+          ./modules/backup.nix
         ];
 
         # Modules reach the flake's own inputs (the kiwami package, quickshell)

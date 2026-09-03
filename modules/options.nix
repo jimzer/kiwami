@@ -110,6 +110,110 @@ in
       '';
     };
 
+    backup = {
+      enable = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          Back /persist up to an S3-compatible bucket with restic.
+
+          /persist is the whole target, deliberately. The machine is
+          declarative, so the only irreplaceable state is what
+          kiwami.persist declares - which makes one list serve three
+          purposes: what survives a reboot, what survives the disk dying,
+          and what `kiwami doctor` checks for gaps. There are no
+          per-directory backup policies to drift out of date.
+        '';
+      };
+
+      repository = mkOption {
+        type = types.str;
+        default = "";
+        description = ''
+          The restic repository, including any path prefix.
+
+          A prefix is what lets one bucket hold more than this: point two
+          machines at s3:.../backups/kiwami-xps and .../kiwami-laptop and they
+          are separate repositories with separate passwords, sharing nothing.
+          That is the safer default - restic has no per-host permissions
+          inside a repository, so a compromised machine could delete another's
+          snapshots.
+
+          Not a secret, which is why it lives here rather than in the
+          credentials file. It names where the backups are, not how to open
+          them.
+        '';
+        example = "s3:https://ACCOUNT.r2.cloudflarestorage.com/backups/kiwami-xps";
+      };
+
+      credentialsFile = mkOption {
+        type = types.str;
+        default = "/var/lib/kiwami/backup/env";
+        description = ''
+          Where the repository password and the bucket's access keys live, as
+          an environment file readable only by root.
+
+          Under /var/lib/kiwami because that path is already persisted, so the
+          arrangement is the same whether or not the root is ephemeral.
+
+          Encrypting this on disk would buy very little: anything that can
+          decrypt it at runtime is exactly what an attacker would be running
+          as. Encryption at rest is what the disk is for. What does help is
+          immutability at the far end - a bucket lock means a compromised
+          machine cannot destroy the backups it can write.
+        '';
+      };
+
+      exclude = mkOption {
+        type = types.listOf types.str;
+        default = [
+          "node_modules"
+          ".venv"
+          "__pycache__"
+          ".direnv"
+          "dist"
+          "build"
+          ".next"
+          "target"
+          "result"
+          "result-*"
+        ];
+        description = ''
+          Directory names never worth storing: build output, dependency
+          trees, and Nix result symlinks.
+
+          Source is backed up wholesale rather than cleverly. It is tempting
+          to skip anything already committed and pushed, but the valuable
+          part of a working tree is exactly what is not - uncommitted work,
+          stashes, .env files, scratch notes. Those are small. Dropping build
+          artifacts gets nearly all of the size win with none of that risk.
+
+          restic also honours CACHEDIR.TAG, which Cargo writes into target/,
+          so Rust build output disappears without being named. It is listed
+          anyway: belt and braces, and the list should read as what it means.
+        '';
+      };
+
+      schedule = mkOption {
+        type = types.str;
+        default = "daily";
+        description = ''
+          A systemd calendar expression. Daily suits a machine whose state
+          changes slowly; the backup is incremental, so a run with nothing
+          new costs a handful of requests.
+        '';
+      };
+
+      keep = mkOption {
+        type = types.attrsOf types.int;
+        default = { daily = 7; weekly = 4; monthly = 6; };
+        description = ''
+          What `restic forget` keeps. Pruning is the expensive operation
+          against object storage, so it is monthly rather than per-run.
+        '';
+      };
+    };
+
     persist = {
       directories = mkOption {
         type = types.listOf types.str;
