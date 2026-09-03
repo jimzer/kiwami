@@ -49,14 +49,23 @@ pub fn ensure(interactive: bool) -> Result<(), String> {
             .into());
     }
 
-    // Ethernet that is plugged in but idle is the cheap case: NetworkManager
-    // brings it up with no questions asked.
-    if let Some(dev) = idle_ethernet()? {
-        println!("    trying ethernet on {dev}");
-        let _ = nmcli(&["device", "connect", &dev]);
-        if settle() {
-            return Ok(());
-        }
+    // Nothing below means anything until NetworkManager has finished starting.
+    //
+    // The guided installer runs the moment the console logs in, which on a
+    // cold boot is before NetworkManager has enumerated a single device. Every
+    // query came back empty: no ethernet to bring up and no wifi device to
+    // scan, so it announced that the machine had no wifi hardware and quit -
+    // on a laptop whose wifi was fine. That was the first thing a real machine
+    // ever did with the guided installer.
+    wait_for_devices(20);
+
+    // Ethernet is the cheap case, but only once it has a carrier. Early in a
+    // boot the interface exists and is still "unavailable", which reads
+    // exactly like a machine with no cable - so the first version of this
+    // waited for a device to appear, saw one immediately, and fell through to
+    // wifi anyway. What matters is the link, not the device.
+    if devices()?.iter().any(|d| d.kind == "ethernet") && wait_for_link(45) {
+        return Ok(());
     }
 
     if !interactive {
@@ -237,6 +246,59 @@ fn devices() -> Result<Vec<Device>, String> {
             })
         })
         .collect())
+}
+
+/// Wait for an ethernet link to come up, bringing it up if it is merely idle.
+///
+/// Deliberately bounded and only entered when this machine has an ethernet
+/// device at all: a laptop with nothing but wifi should reach the wifi prompt
+/// straight away rather than sitting through a timeout for a socket it does
+/// not have.
+fn wait_for_link(secs: u64) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    let mut announced = false;
+    loop {
+        if online() {
+            return true;
+        }
+        if let Ok(Some(dev)) = idle_ethernet() {
+            if !announced {
+                println!("    trying ethernet on {dev}");
+            }
+            let _ = nmcli(&["device", "connect", &dev]);
+        } else if !announced {
+            println!("    waiting for the network to come up");
+        }
+        announced = true;
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(2));
+    }
+}
+
+/// Wait for NetworkManager to know what hardware this machine has.
+fn wait_for_devices(secs: u64) -> bool {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(secs);
+    let mut said = false;
+    loop {
+        if let Ok(list) = devices() {
+            // "unavailable" here means the driver is up but there is no
+            // carrier, which is still a device we know about. What we are
+            // waiting for is anything at all besides loopback.
+            if list.iter().any(|d| d.kind != "loopback" && d.kind != "unknown") {
+                return true;
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        if !said {
+            println!("    waiting for network devices");
+            said = true;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
 }
 
 /// An ethernet device that exists but is not carrying traffic. "unavailable"

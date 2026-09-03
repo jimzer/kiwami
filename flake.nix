@@ -348,7 +348,23 @@
               # a second login stays a shell, so a wrong turn is not a reboot.
               # Other TTYs are left alone entirely.
               programs.bash.loginShellInit = ''
-                if [ "$(tty)" = "/dev/tty1" ] && [ ! -e /tmp/.kiwami-installer-started ]; then
+                # Where the installer should appear: the serial console when
+                # the kernel has one - a headless machine, or the harness -
+                # and the screen otherwise. Exactly one console, because two
+                # installers on one disk is worse than none.
+                #
+                # Gating on tty1 alone put it where nobody was looking: a
+                # headless install ran the whole conversation on a screen that
+                # does not exist, while the serial line it was being watched
+                # on sat at a shell prompt. ssh gets /dev/pts/N and matches
+                # neither.
+                kiwami_want=/dev/tty1
+                for kiwami_t in $(cat /sys/class/tty/console/active 2>/dev/null); do
+                  case "$kiwami_t" in
+                    ttyS*|ttyAMA*) kiwami_want=/dev/$kiwami_t ;;
+                  esac
+                done
+                if [ "$(tty)" = "$kiwami_want" ] && [ ! -e /tmp/.kiwami-installer-started ]; then
                   touch /tmp/.kiwami-installer-started
                   sudo kiwami install --guided || true
                   echo

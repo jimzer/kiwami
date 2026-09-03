@@ -68,7 +68,7 @@ eval:
 # Syntax of every script and justfile, plus the CLI's unit tests.
 lint:
     @cargo test --manifest-path cli/Cargo.toml --quiet 2>&1 | grep -E "test result|^error" || true
-    @rc=0; for f in vm/scripts/*.sh; do \
+    @rc=0; for f in vm/scripts/*.sh scripts/*.sh; do \
         if bash -n "$f"; then echo "ok   $f"; else echo "FAIL $f"; rc=1; fi; done; \
       for f in vm/scripts/*.py; do \
         if python3 -c "import ast,sys;ast.parse(open(sys.argv[1]).read())" "$f"; \
@@ -79,6 +79,29 @@ lint:
 
 # Everything that can be verified without a Linux builder.
 check: lint host-push-test eval
+
+# --- the rented builder ------------------------------------------------
+#
+# A bare-metal box by the hour, because macOS cannot build Linux derivations
+# and every cheap VPS has nested virtualization switched off - which nixosTest
+# needs, being QEMU. Created and destroyed per session: Elastic Metal has
+# neither snapshots nor persistent disks, so there is nothing to keep.
+
+# Rent a builder and set it up (idempotent - reuses one that is already up)
+cloud-up:
+    @./scripts/cloud.sh up
+
+# Is one running, for how long, and what has it cost
+cloud-status:
+    @./scripts/cloud.sh status
+
+# Shell on the builder:  just cloud-ssh 'nproc'
+cloud-ssh *CMD:
+    @./scripts/cloud.sh ssh {{CMD}}
+
+# Destroy it. The disk goes with it; billing stops.
+cloud-down:
+    @./scripts/cloud.sh down
 
 # `kiwami host push` sends the host directory and nothing else. Needs only git
 # and the built CLI, so it belongs here rather than in the VM matrix.

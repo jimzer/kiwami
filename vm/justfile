@@ -85,6 +85,12 @@ luks-test: fetch-iso
 ephemeral-test: fetch-iso
     ./scripts/ephemeral-test.sh
 
+# Drive the guided installer from a cold boot the way a person does. Stops at
+# the confirmation, so it never installs: every guided-flow bug so far was in
+# the conversation, before anything was written.
+guided-test:
+    @python3 ./scripts/guided-test.py
+
 # Run the installer test matrix (needs start-test-disks)
 install-test:
     @./scripts/install-test.sh
