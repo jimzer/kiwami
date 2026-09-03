@@ -112,7 +112,12 @@ fn build_and_push(
     // The base is origin/main, so a branch with an open pull request still
     // differs from it and would be pushed again on every run - a fresh commit
     // with the same content, and a notification, for nothing.
-    if on_remote && git(work, &["diff", "--quiet", &remote_branch, "HEAD"]).is_ok() {
+    // Scoped to the host directory. Comparing whole trees says "different" as
+    // soon as main gains any commit, because the existing branch was built on
+    // an older main - so an untouched host would be re-pushed every time
+    // anything else landed. What matters is whether the branch already carries
+    // this machine's files.
+    if on_remote && git(work, &["diff", "--quiet", &remote_branch, "HEAD", "--", rel]).is_ok() {
         println!("\n{branch} already has exactly this - nothing to push");
         return Ok(());
     }
@@ -125,9 +130,21 @@ fn build_and_push(
     // does not exist yet is pushed plainly. That still refuses a non-fast
     // -forward, so nothing is overwritten unseen either way.
     let dest = format!("HEAD:refs/heads/{branch}");
+    // The lease carries the commit that was just fetched, rather than relying
+    // on git to find it: the bare --force-with-lease form reads the
+    // remote-tracking ref and its reflog, neither of which a shallow
+    // single-branch clone maintains for a branch it was never configured to
+    // fetch. It rejected every second push with "stale info".
+    let lease = if on_remote {
+        git(work, &["rev-parse", &remote_branch]).ok().map(|sha| {
+            format!("--force-with-lease=refs/heads/{branch}:{}", sha.trim())
+        })
+    } else {
+        None
+    };
     let mut args = vec!["push"];
-    if on_remote {
-        args.push("--force-with-lease");
+    if let Some(l) = &lease {
+        args.push(l);
     }
     args.extend_from_slice(&["origin", &dest]);
     git(work, &args)?;
