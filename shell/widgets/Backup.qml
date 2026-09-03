@@ -65,7 +65,13 @@ Text {
         if (!status.ok) return "󰀦 backup failed";
         const h = root.ageHours;
         if (h < 0) return "󰁯";
-        if (h < 1) return "󰁯 just now";
+        // Minutes for the first hour. An hour of unchanging "just now" is
+        // indistinguishable from a widget that has stopped updating - which
+        // it had, and the question "is that normal?" got asked twice before
+        // the bug was found. A number that moves every minute answers it
+        // without anyone having to ask.
+        if (h < 1 / 60) return "󰁯 just now";
+        if (h < 1) return "󰁯 " + Math.round(h * 60) + "m";
         if (h < 24) return "󰁯 " + Math.round(h) + "h";
         return "󰁯 " + Math.round(h / 24) + "d";
     }
