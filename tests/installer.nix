@@ -81,40 +81,57 @@ pkgs.testers.nixosTest {
         "EOF"
     )
 
-    with subtest("it asks about the network first"):
-        # Started explicitly rather than through the console autostart: what
-        # is under test here is the conversation. Whether it launches by
-        # itself is a property of the installer image, covered where the
-        # image is built.
-        # A nixosTest VM has no internet, so the real probe can never succeed
-        # and the installer would sit through its network step and then exit -
-        # which is correct behaviour and makes the conversation untestable.
-        # file:// is fetched by curl without a network at all.
-        machine.send_chars(
-            "KIWAMI_NET_PROBE=file:///etc/os-release "
-            "kiwami install --guided --flake /tmp/flake 2>&1 | tee /tmp/log\n"
+    # Driven through a pipe rather than the console.
+    #
+    # send_chars types at the machine's console, which on a nixosTest node is
+    # not reliably sitting at a shell - the keystrokes went nowhere and the
+    # test sat watching NetworkManager retry until it timed out. A fifo needs
+    # no shell and no tty, and the answers land in the installer's stdin
+    # whatever the console is doing.
+    #
+    # The sleep holds the write end open: without it the first `echo` closes
+    # the fifo and the installer reads EOF, which it correctly treats as a
+    # user who has stopped answering.
+    machine.succeed("mkfifo /tmp/in")
+    machine.succeed("sleep 3600 > /tmp/in &")
+    machine.succeed(
+        "KIWAMI_NET_PROBE=file:///etc/os-release "
+        "kiwami install --guided --flake /tmp/flake "
+        "< /tmp/in > /tmp/out 2>&1 &"
+    )
+
+    def answer(text):
+        machine.succeed("echo '%s' > /tmp/in" % text)
+
+    def wait_for(text, timeout=120):
+        machine.wait_until_succeeds(
+            "grep -qF %s /tmp/out" % ("'" + text + "'"), timeout=timeout
         )
-        machine.wait_for_console_text("checking network")
+
+    with subtest("it checks the network first"):
+        wait_for("checking network")
 
     with subtest("it offers remote access, and declining moves on"):
-        machine.wait_for_console_text("reachable over your tailnet")
-        machine.send_chars("n\n")
-        machine.wait_for_console_text("Machines this flake already describes")
-        machine.wait_for_console_text("alpha")
+        wait_for("reachable over your tailnet")
+        answer("n")
+        wait_for("Machines this flake already describes")
+        wait_for("alpha")
 
     with subtest("the host menu offers a new machine"):
         # It offered this and then refused it, because the clone it needed had
         # not happened yet. The offer and the acceptance broke separately, so
         # they are asserted separately.
-        machine.wait_for_console_text("n) a new machine")
-        machine.wait_for_console_text("Which?")
+        wait_for("n) a new machine")
+        wait_for("Which?")
 
     with subtest("junk re-prompts instead of exiting"):
         # A question that rejects its own answer and quits cost a whole
         # reinstall to discover. The installer is the one program where
         # giving up leaves the machine unusable.
-        machine.send_chars("zzz\n")
-        machine.wait_for_console_text("Which?")
+        answer("zzz")
+        machine.wait_until_succeeds(
+            "test $(grep -c 'Which?' /tmp/out) -ge 2", timeout=60
+        )
 
     with subtest("the disk was never written"):
         after = machine.succeed("sha256sum /dev/vdb").split()[0]
