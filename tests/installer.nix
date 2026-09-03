@@ -86,7 +86,14 @@ pkgs.testers.nixosTest {
         # is under test here is the conversation. Whether it launches by
         # itself is a property of the installer image, covered where the
         # image is built.
-        machine.send_chars("kiwami install --guided --flake /tmp/flake 2>&1 | tee /tmp/log\n")
+        # A nixosTest VM has no internet, so the real probe can never succeed
+        # and the installer would sit through its network step and then exit -
+        # which is correct behaviour and makes the conversation untestable.
+        # file:// is fetched by curl without a network at all.
+        machine.send_chars(
+            "KIWAMI_NET_PROBE=file:///etc/os-release "
+            "kiwami install --guided --flake /tmp/flake 2>&1 | tee /tmp/log\n"
+        )
         machine.wait_for_console_text("checking network")
 
     with subtest("it offers remote access, and declining moves on"):

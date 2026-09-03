@@ -15,13 +15,24 @@ use std::process::{Command, Stdio};
 /// thing we actually care about: that `nixos-install` can reach substituters.
 const PROBE: &str = "https://cache.nixos.org/nix-cache-info";
 
+/// What to fetch to decide we are online, overridable.
+///
+/// A machine installing from a private mirror does not care whether
+/// cache.nixos.org is reachable, and neither does a test: a nixosTest VM has
+/// no internet at all by design, so the guided installer could never get past
+/// its first question there - it waited, fell through to wifi, found no
+/// device and exited, every time.
+fn probe() -> String {
+    std::env::var("KIWAMI_NET_PROBE").unwrap_or_else(|_| PROBE.to_string())
+}
+
 /// Deliberately not "is there a default route". A captive portal hands out a
 /// lease, a gateway and DNS, then serves a login page for every request - by
 /// every local measure you are online, and the install still fails. Asking
 /// for a real file over TLS is the only honest test.
 pub fn online() -> bool {
     Command::new("curl")
-        .args(["-sf", "--max-time", "8", "-o", "/dev/null", PROBE])
+        .args(["-sf", "--max-time", "8", "-o", "/dev/null", &probe()])
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
