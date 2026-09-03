@@ -29,7 +29,10 @@ in
       # Home is wiped with the root now, so anything under it that matters has
       # to be named. impermanence stores these in /persist/home/<user> and
       # restores ownership, which is the part that is tedious to hand-roll.
-      users.${cfg.user}.directories = cfg.persist.userDirectories;
+      users.${cfg.user} = {
+        directories = cfg.persist.userDirectories;
+        files = cfg.persist.userFiles;
+      };
     };
 
     # /persist and /nix must be mounted before anything tries to bind out of

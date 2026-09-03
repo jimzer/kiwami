@@ -134,6 +134,29 @@ in
         example = [ "/etc/machine-id" ];
       };
 
+      userFiles = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        description = ''
+          Individual files under the desktop user's home that must survive,
+          relative to it.
+
+          The reason this exists alongside userDirectories: a directory is the
+          wrong unit when it mixes a secret with declarative config.
+          ~/.config/gh holds hosts.yml (your token, must survive, cannot come
+          from the flake), config.yml (preferences, comes from the flake) and
+          state.yml (an update-check cache that should survive nothing).
+          Persisting the directory takes all three, and then home-manager and
+          the bind mount both own config.yml - the flake writes a store symlink
+          into /persist, which dangles once that generation is collected. It
+          half-works, which is worse than failing.
+
+          So: no path gets two owners. Persist the file, let the flake own the
+          rest of the directory.
+        '';
+        example = [ ".config/gh/hosts.yml" ];
+      };
+
       userDirectories = mkOption {
         type = types.listOf types.str;
         default = [ "kiwami" ".ssh" ".local/state" ];

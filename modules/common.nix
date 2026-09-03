@@ -92,6 +92,12 @@
     "/etc/ssh/ssh_host_rsa_key.pub"
   ];
 
+  # gh's token, and deliberately nothing else from that directory. config.yml
+  # beside it is written by the flake below, and state.yml is an update-check
+  # cache that should not outlive a boot. See kiwami.persist.userFiles for why
+  # this is a file and not the directory.
+  kiwami.persist.userFiles = [ ".config/gh/hosts.yml" ];
+
   # NetworkManager, not scripted DHCP. `kiwami net` drives nmcli, so without
   # this the command ships on every machine and works on none of them - and a
   # laptop with no way to join a wireless network is not a laptop. The VM
@@ -131,5 +137,24 @@
       echo "  sudo kiwami passwd" >&2
       exit 1
     ''))
-  ] ++ (with pkgs; [ git vim curl htop rsync jq ]);
+  ] ++ (with pkgs; [
+    git
+    vim
+    curl
+    htop
+    rsync
+    jq
+
+    # gh, because a machine that can build its config but not push it loses
+    # the config when the disk dies - and that is not hypothetical, it is how
+    # hosts/xps spent its first week. gh authenticates through a browser on
+    # whatever device you have, so there is no key to place first.
+    gh
+
+    # python3 as a tool, not a runtime: one-liners and small scripts,
+    # including remote maintenance on a machine whose only other option is
+    # sed. Project dependencies belong in a per-project devshell with uv, so
+    # two projects cannot collide in the system profile.
+    python3
+  ]);
 }
