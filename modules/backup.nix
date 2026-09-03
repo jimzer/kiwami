@@ -45,6 +45,9 @@ in
         # backup job has no business being able to modify what it is reading.
         ProtectSystem = "strict";
         CacheDirectory = "restic";
+        # Where the status file is written. Everything else stays read-only:
+        # a backup job should not be able to modify what it is reading.
+        ReadWritePaths = [ (builtins.dirOf cfg.credentialsFile) ];
         # restic assembles pack files in TMPDIR before uploading them. Under
         # ProtectSystem=strict /tmp is read-only, so the first real backup
         # died on "read-only file system" partway through - after reporting
@@ -62,6 +65,22 @@ in
       path = [ pkgs.restic ];
       script = ''
         set -euo pipefail
+
+        # What happened, written down for the bar to read.
+        #
+        # The widget runs as the desktop user and cannot open the repository -
+        # the credentials are root-only, and asking object storage every thirty
+        # seconds for a fact that changes once a day would be wrong even if it
+        # could. So the job that already knows records the answer, and the
+        # widget reads a file: instant, offline, and able to say "the last one
+        # failed", which querying the repository could never tell you.
+        status=${builtins.dirOf cfg.credentialsFile}/status.json
+        record() {
+          printf '{"ok":%s,"time":"%s","id":"%s","bytes":%s}\n' \
+            "$1" "$(date -Is)" "''${2:-}" "''${3:-0}" > "$status"
+          chmod 0644 "$status"
+        }
+        trap 'record false' ERR
 
         restic snapshots >/dev/null 2>&1 || {
           echo "no repository at ${cfg.repository} - run: sudo kiwami backup setup"
@@ -81,6 +100,10 @@ in
           ${lib.concatStringsSep " "
             (lib.mapAttrsToList (k: v: "--keep-${k} ${toString v}") cfg.keep)} \
           $([ "$(date +%d)" = "01" ] && echo --prune || true)
+
+        id=$(restic snapshots --tag kiwami --latest 1 --json | ${pkgs.jq}/bin/jq -r '.[0].short_id // ""')
+        bytes=$(restic stats latest --mode raw-data --json | ${pkgs.jq}/bin/jq -r '.total_size // 0')
+        record true "$id" "$bytes"
       '';
     };
 
