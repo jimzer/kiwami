@@ -92,11 +92,10 @@
     "/etc/ssh/ssh_host_rsa_key.pub"
   ];
 
-  # gh's token, and deliberately nothing else from that directory. config.yml
-  # beside it is written by the flake below, and state.yml is an update-check
-  # cache that should not outlive a boot. See kiwami.persist.userFiles for why
-  # this is a file and not the directory.
-  kiwami.persist.userFiles = [ ".config/gh/hosts.yml" ];
+  # gh's whole config directory. It writes config.yml itself during login, so
+  # splitting the directory between the flake and /persist meant a successful
+  # login reporting failure - see modules/home/configs.nix.
+  kiwami.persist.userDirectories = [ ".config/gh" ];
 
   # NetworkManager, not scripted DHCP. `kiwami net` drives nmcli, so without
   # this the command ships on every machine and works on none of them - and a

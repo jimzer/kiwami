@@ -94,7 +94,7 @@ pub fn run(login: bool) -> Result<(), String> {
     }
 
     if !login {
-        println!("\n{} to set up. Run `kiwami auth --login` to do them now.", missing.len());
+        println!("\n{} to set up. Run `kiwami auth login` to do them now.", missing.len());
         // Non-zero so this is usable as a check, the same way `doctor` is.
         return Err(String::new());
     }
@@ -110,7 +110,7 @@ pub fn run(login: bool) -> Result<(), String> {
             // One failure does not stop the walk. The point of the command is
             // to get through the list, and a tailnet login that was cancelled
             // should not hide that gh is still unauthenticated.
-            println!("    {} did not complete - rerun `kiwami auth --login`", p.name);
+            println!("    {} did not complete - rerun `kiwami auth login`", p.name);
         }
     }
 

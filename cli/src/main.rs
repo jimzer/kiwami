@@ -78,9 +78,8 @@ enum Cmd {
     Doctor,
     /// Show which tools still need a credential
     Auth {
-        /// Log in to whatever is missing, one at a time
-        #[arg(long)]
-        login: bool,
+        #[command(subcommand)]
+        action: Option<AuthCmd>,
     },
     /// Back /persist up, and put it back
     Snapshot {
@@ -98,6 +97,12 @@ enum Cmd {
         #[arg(long, default_value_t = true)]
         json: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum AuthCmd {
+    /// Log in to whatever is missing, one at a time
+    Login,
 }
 
 #[derive(Subcommand)]
@@ -211,7 +216,8 @@ fn main() -> std::process::ExitCode {
                 return std::process::ExitCode::FAILURE;
             }
         }
-        Cmd::Auth { login } => {
+        Cmd::Auth { action } => {
+            let login = matches!(action, Some(AuthCmd::Login));
             if let Err(e) = auth::run(login) {
                 // An empty message is the "gaps remain" case, already printed
                 // as a list. Only a real error is worth a second line.

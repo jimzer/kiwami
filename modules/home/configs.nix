@@ -33,15 +33,15 @@
     };
   };
 
-  # gh's config.yml, from the flake. Its token lives in hosts.yml beside this,
-  # which is persisted instead - the two halves of that directory have
-  # different owners on purpose. See kiwami.persist.userFiles.
-  programs.gh = {
-    enable = true;
-    settings = {
-      # https, not ssh: the token gh already holds is then enough to push, so
-      # there is no key to place on a machine that wipes itself.
-      git_protocol = "https";
-    };
-  };
+  # gh is deliberately not configured from here.
+  #
+  # The tidy version of this split gave the flake config.yml and persisted
+  # hosts.yml beside it. gh does not agree: `gh auth login` writes
+  # git_protocol into config.yml, hit a read-only store symlink, and reported
+  # "gh did not complete" on a login that had in fact succeeded.
+  #
+  # config.yml is state that gh maintains, not configuration we impose, so it
+  # is persisted whole and gh owns it. The principle stands - what the flake
+  # owns, it owns completely - and the lesson is that the boundary belongs
+  # where the program puts it, not where the split looks neatest.
 }
