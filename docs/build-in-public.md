@@ -313,6 +313,79 @@ own tooling.
 
 ---
 
+### 12. The test passed against a binary that never contained the fix
+
+I wrote a test for the guided installer, ran it, and got a real failure: the
+installer declared the machine had no wifi hardware and quit. That was the
+same bug that had cost a real reinstall weeks earlier, now reproduced in a VM
+in two minutes.
+
+I fixed it. Reran. Same failure. Diagnosed deeper, fixed again. Same failure.
+
+Then I looked at the top of the log instead of the bottom:
+
+    tar: Write error
+    error: recipe `push` failed with exit code 255
+
+The ISO had never been rebuilt. The build pushes the source into a VM - macOS
+cannot build Linux - and that VM was not running, because the test I had just
+run had killed it. So the build failed, and I did not notice, because I had
+written:
+
+    just build-iso 2>&1 | tail -2 && just guided-test
+
+A pipeline's exit status is the *last* command's. `tail` always succeeds. So
+`&&` ran the test regardless, against the previous image, twice, and I
+diagnosed the product from a binary that never contained my fix.
+
+Every bug in this list is some version of "it reported success while doing
+nothing". This is the first one I built myself, in the tool I was using to
+find the others.
+
+### 13. The installer ran perfectly where nobody could see it
+
+The same test, first run: the serial console showed a login prompt and a
+shell. No installer. It is supposed to start on its own.
+
+It was running - `pgrep` found it, pid 959, doing its job. On tty1. The
+virtual console of a headless VM, which nothing renders and nobody watches,
+while the serial line the operator is actually attached to sat idle.
+
+The autostart was gated on `/dev/tty1`, which is right for a laptop and
+useless for a headless machine. It now asks the kernel which console it is
+using. A bug that only exists when nobody is looking at the screen is
+difficult to see, for reasons that are almost too neat.
+
+### 14. My own test matched the wrong string and went green
+
+Same test again. Before finding that, it *passed* the assertion "the guided
+installer starts with no keystroke".
+
+It waited for the text `Kiwami installer`. That string appears in the
+installer's banner - and also in the getty help text printed above the login
+prompt. So the test went green against a console that was sitting at a shell,
+having started nothing at all.
+
+The fix is one word: wait for `==> checking network`, which only the installer
+itself prints. But the lesson is the one this whole project keeps teaching -
+a test that can pass for the wrong reason is worse than no test, because it
+converts an absence into a green tick.
+
+### 15. Ten minutes of a rented server that was never installed
+
+Renting a bare-metal builder, the API said `status: ready`, so the script
+sshed in. Permission denied. Then the host key changed. Then the machine went
+dark entirely.
+
+`status: ready` means the hardware is allocated. The OS install has a
+*different* field, `install.status`, and it was still `installing`. The box I
+had been talking to was the installer environment, which is why the key
+changed underneath me when the real system finally booted.
+
+Same shape as the flake in a shallow clone, the wifi query before
+NetworkManager was up, the brightness marker with no file to watch: the thing
+answered, it just was not the thing I thought I was asking.
+
 ## The thread that ties it together
 
 Almost every real bug was **something reporting success while doing nothing**.
