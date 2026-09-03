@@ -7,9 +7,11 @@
 # Devices are named by id, not /dev/sdX: kernel names follow the order disks
 # are found in, so adding a drive can silently repoint this at another one.
 #
-# No swap partition: zram is used instead - compressed swap in RAM. It
-# costs no disk, and can be turned off or joined by a swapfile with a
-# rebuild, unlike this file.
+# Swap is zram plus a 8G swapfile on @swap, not a partition:
+# zram first - compressed swap in RAM, costing no disk - and the file
+# underneath it as headroom for pages that stop compressing well.
+# Neither needs a stable resume offset, so both can be resized or
+# dropped with a rebuild, unlike this file.
 #
 # Editing this after installing does not repartition anything. It describes a
 # disk that already exists.
