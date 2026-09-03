@@ -36,10 +36,20 @@ jobs:
             echo
           done
 
-      # The nixosTest is built in another job; evaluating it here means a
-      # broken import in the test surfaces in 60s instead of after a VM boot.
-      - name: the desktop test evaluates
-        run: nix eval --raw '.#checks.x86_64-linux.desktop.drvPath'
+      # The tests are built in another job; evaluating them here means a
+      # broken import surfaces in 60s instead of after a VM boot. Asks the
+      # flake which checks exist rather than repeating the list, for the same
+      # reason the host loop above does - a hardcoded list stops covering
+      # anything added after it was written.
+      - name: every test evaluates
+        run: |
+          checks=$(nix eval --json '.#checks.x86_64-linux' --apply builtins.attrNames | jq -r '.[]')
+          echo "checks: $checks"
+          for c in $checks; do
+            echo "==> $c"
+            nix eval --raw ".#checks.x86_64-linux.$c.drvPath"
+            echo
+          done
 
   # The Mac cannot build Linux, so this is the first place the CLI and the
   # system closure are actually compiled for the architecture the real
@@ -95,6 +105,25 @@ jobs:
           name: kiwami-installer-x86_64
           path: result/iso/*.iso
           if-no-files-found: error
+
+  # The heavy VM tests: a full disko partitioning, an install, and a reboot
+  # each. Manual rather than on every push - they are minutes apiece, and the
+  # machine they are meant to run on is the rented builder (`just cloud-test`),
+  # where there is real KVM. Here they are the backstop that proves they still
+  # pass somewhere other than one laptop.
+  vm-tests:
+    name: vm tests
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        check: [installer, ephemeral, luks]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: DeterminateSystems/nix-installer-action@main
+      - name: ${{ matrix.check }}
+        run: nix build --print-build-logs ".#checks.x86_64-linux.${{ matrix.check }}"
 
   # Boots the desktop in a VM and asserts the session actually comes up.
   # Needs a Linux host, which is the whole reason it lives here and not on
