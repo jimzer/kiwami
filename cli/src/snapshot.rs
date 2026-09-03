@@ -219,9 +219,13 @@ fn canary(cred: &str) -> Result<(), String> {
     }
     println!("    wrote a file, read it back from the bucket, contents match");
 
-    // The canary snapshot is not worth keeping, and leaving it makes every
-    // later `snapshots` listing confusing.
-    let _ = restic(cred, &["forget", "--tag", "canary", "--prune"]);
+    // By id, not by tag. `restic forget --tag canary` removes nothing at all -
+    // forget refuses to act without a retention policy and says so as a Fatal
+    // that the exit code then hides behind an ignored result, so the canary
+    // quietly stayed in the repository.
+    for id in snapshot_ids(cred, "canary")? {
+        let _ = restic(cred, &["forget", &id, "--prune"]);
+    }
     let _ = fs::remove_dir_all(dir);
     let _ = fs::remove_dir_all(restored);
     Ok(())
@@ -320,6 +324,29 @@ fn write_credentials(
         .map_err(|e| format!("{path}: {e}"))?;
     println!("\nwrote {path}");
     Ok(())
+}
+
+/// Snapshot ids carrying a tag, newest first.
+fn snapshot_ids(cred: &str, tag: &str) -> Result<Vec<String>, String> {
+    let out = Command::new("bash")
+        .arg("-c")
+        .arg(format!(
+            "set -a; . {cred}; set +a; exec restic snapshots --tag '{tag}' --json"
+        ))
+        .output()
+        .map_err(|e| format!("restic: {e}"))?;
+    if !out.status.success() {
+        return Ok(Vec::new());
+    }
+    let v: serde_json::Value =
+        serde_json::from_slice(&out.stdout).map_err(|e| format!("restic snapshots: {e}"))?;
+    Ok(v.as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|s| s.get("short_id").and_then(|i| i.as_str()).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default())
 }
 
 fn restic(cred: &str, args: &[&str]) -> Result<(), String> {
