@@ -1361,11 +1361,18 @@ fn render_disk_nix(l: &Layout) -> Result<String, String> {
         );
     }
     if !l.hibernate {
-        notes.push_str(
-            "#\n# No swap partition: zram is used instead - compressed swap in RAM. It\n\
-             # costs no disk, and can be turned off or joined by a swapfile with a\n\
-             # rebuild, unlike this file.\n",
-        );
+        // What is actually generated, which is both. The note used to say
+        // "no swap ... can be joined by a swapfile with a rebuild" - written
+        // when the swapfile was optional, and left behind when it stopped
+        // being. It then described a machine that had 8G of swapfile mounted
+        // while the comment above it said there was none.
+        notes.push_str(&format!(
+            "#\n# Swap is zram plus a {swap_gib}G swapfile on @swap, not a partition:\n\
+             # zram first - compressed swap in RAM, costing no disk - and the file\n\
+             # underneath it as headroom for pages that stop compressing well.\n\
+             # Neither needs a stable resume offset, so both can be resized or\n\
+             # dropped with a rebuild, unlike this file.\n"
+        ));
     }
 
     Ok(format!(
