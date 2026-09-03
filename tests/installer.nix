@@ -49,6 +49,11 @@ pkgs.testers.nixosTest {
     # not available", and the test cuts the link rather than the daemon.
     networking.networkmanager.enable = true;
     networking.useDHCP = false;
+
+    # The installer asks a flake which machines it describes. Doing that
+    # offline with the real flake would mean carrying nixpkgs, home-manager,
+    # disko and the rest into the VM's store just to read a list of names.
+    nix.settings.experimental-features = [ "nix-command" "flakes" ];
   };
 
   testScript = ''
@@ -59,6 +64,22 @@ pkgs.testers.nixosTest {
     # installer that writes before the confirmation is a worse bug than any
     # of the prompt failures this test exists for.
     before = machine.succeed("sha256sum /dev/vdb").split()[0]
+
+    # A flake with no inputs at all. The installer only needs the *names* of
+    # the machines it describes at this point, and this test aborts before
+    # anything would be built - so a flake that declares two hosts and
+    # depends on nothing evaluates offline in milliseconds, where the real
+    # one would need its entire input closure copied into the VM.
+    machine.succeed("mkdir -p /tmp/flake")
+    machine.succeed(
+        "cat > /tmp/flake/flake.nix <<'EOF'\n"
+        "{\n"
+        "  outputs = { self }: {\n"
+        "    nixosConfigurations = { alpha = {}; beta = {}; };\n"
+        "  };\n"
+        "}\n"
+        "EOF"
+    )
 
     with subtest("it asks about the network first"):
         # Started explicitly rather than through the console autostart: what
@@ -72,6 +93,7 @@ pkgs.testers.nixosTest {
         machine.wait_for_console_text("reachable over your tailnet")
         machine.send_chars("n\n")
         machine.wait_for_console_text("Machines this flake already describes")
+        machine.wait_for_console_text("alpha")
 
     with subtest("the host menu offers a new machine"):
         # It offered this and then refused it, because the clone it needed had
