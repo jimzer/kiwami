@@ -76,7 +76,7 @@ pass "the working tree, branch and index are untouched"
 cyan "==> pushing again with nothing changed"
 out=$(KIWAMI_REPO="$PWD" "$kiwami" host push foo --no-pr 2>&1)
 # The branch already matches, so this is a no-op rather than an empty commit.
-echo "$out" | grep -q "already has exactly this" || fail "expected a no-op, got: $out"
+echo "$out" | grep -q "already carries exactly this" || fail "expected a no-op, got: $out"
 pass "a second push with no change does nothing"
 
 cyan "==> main advances, with the host untouched"
@@ -92,7 +92,7 @@ cyan "==> a third run, after the branch exists on the remote"
 # clone there is no refs/remotes/origin/host/foo, so the no-op check could not
 # fire and --force-with-lease had no lease - "stale info", every time.
 out=$(KIWAMI_REPO="$PWD" "$kiwami" host push foo --no-pr 2>&1)
-echo "$out" | grep -q "already has exactly this" || fail "expected a no-op, got: $out"
+echo "$out" | grep -q "already carries exactly this" || fail "expected a no-op, got: $out"
 pass "still a no-op on a shallow clone, with main moved on"
 
 printf '\033[1;32m==> host push sends only the host\033[0m\n'

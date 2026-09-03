@@ -82,20 +82,6 @@ fn build_and_push(
         return Ok(());
     }
 
-    println!("\n    changed:");
-    let stat = git(work, &["diff", "--cached", "--stat"])?;
-    for line in stat.lines() {
-        println!("    {line}");
-    }
-
-    let subject = format!("hosts: {name}");
-    let body = format!(
-        "Written by `kiwami install` on the machine itself and pushed with \
-         `kiwami host push`.\n\n{}",
-        facts(src)
-    );
-    git(work, &["commit", "--quiet", "-m", &subject, "-m", &body])?;
-
     let branch = format!("host/{name}");
 
     // Fetch the host branch by name rather than trusting remote-tracking refs
@@ -109,18 +95,32 @@ fn build_and_push(
     let refspec = format!("+refs/heads/{branch}:refs/remotes/{remote_branch}");
     let on_remote = git(work, &["fetch", "--quiet", "origin", &refspec]).is_ok();
 
-    // The base is origin/main, so a branch with an open pull request still
-    // differs from it and would be pushed again on every run - a fresh commit
-    // with the same content, and a notification, for nothing.
-    // Scoped to the host directory. Comparing whole trees says "different" as
-    // soon as main gains any commit, because the existing branch was built on
-    // an older main - so an untouched host would be re-pushed every time
-    // anything else landed. What matters is whether the branch already carries
-    // this machine's files.
-    if on_remote && git(work, &["diff", "--quiet", &remote_branch, "HEAD", "--", rel]).is_ok() {
-        println!("\n{branch} already has exactly this - nothing to push");
+    // Asked before anything is reported as changed. The diff below is against
+    // main, which legitimately does not carry this host yet - so printing it
+    // and then "nothing to push" read as a contradiction.
+    //
+    // Scoped to the host directory: comparing whole trees calls the host
+    // changed as soon as main gains any commit, because the branch was built
+    // on an older main.
+    if on_remote && git(work, &["diff", "--cached", "--quiet", &remote_branch, "--", rel]).is_ok() {
+        println!("\n{branch} already carries exactly this - nothing to push");
+        println!("    (not on {base} yet: the pull request is open)");
         return Ok(());
     }
+
+    println!("\n    to push:");
+    let stat = git(work, &["diff", "--cached", "--stat"])?;
+    for line in stat.lines() {
+        println!("    {line}");
+    }
+
+    let subject = format!("hosts: {name}");
+    let body = format!(
+        "Written by `kiwami install` on the machine itself and pushed with \
+         `kiwami host push`.\n\n{}",
+        facts(src)
+    );
+    git(work, &["commit", "--quiet", "-m", &subject, "-m", &body])?;
 
     println!("\n==> pushing {branch}");
     // The branch is regenerated from origin/main every time, so it is expected
