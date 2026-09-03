@@ -261,8 +261,25 @@ cmd_test() {
     local SSHOPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15)
 
     local what="${1:-all}"
-    local flake="${KIWAMI_CLOUD_FLAKE:-github:jimzer/kiwami}"
     local log="/tmp/kiwami-test-$what.log"
+
+    # Pinned to this checkout's commit, not to the branch.
+    #
+    # `github:owner/repo` is cached for an hour (tarball-ttl), so a push made
+    # minutes ago is invisible and the builder happily tests the previous
+    # commit - which it did, and the log showed the exact behaviour the fix
+    # had already removed. Same shape as building an ISO from a tree that was
+    # never pushed: the thing under test was not the thing being changed.
+    local flake="${KIWAMI_CLOUD_FLAKE:-}"
+    if [ -z "$flake" ]; then
+        local rev
+        rev="$(git rev-parse HEAD)"
+        if ! git branch -r --contains "$rev" 2>/dev/null | grep -q origin; then
+            die "HEAD ($rev) is not on origin yet - push first, the builder
+fetches from GitHub rather than from this directory."
+        fi
+        flake="github:jimzer/kiwami/$rev"
+    fi
 
     # The flake is fetched from GitHub rather than pushed. What the builder
     # tests is then exactly what CI and a real install would get, with no copy
