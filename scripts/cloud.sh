@@ -25,8 +25,8 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # accident.
 TAG="${KIWAMI_CLOUD_TAG:-kiwami-builder}"
 ZONE="${KIWAMI_CLOUD_ZONE:-fr-par-2}"
-OFFER="${KIWAMI_CLOUD_OFFER:-EM-A115X-SSD}"   # Aluminium, 4C/32G
-IMAGE="${KIWAMI_CLOUD_IMAGE:-ubuntu_jammy}"
+OFFER="${KIWAMI_CLOUD_OFFER:-EM-A116X-SSD}"   # Aluminium: 4 cores, 29G, EUR 0.077/h
+IMAGE="${KIWAMI_CLOUD_IMAGE:-Ubuntu 24.04}"
 RATE="${KIWAMI_CLOUD_RATE:-0.077}"            # EUR/hour, for the cost line
 
 cyan() { printf '\033[1;36m%s\033[0m\n' "$1"; }
@@ -50,6 +50,17 @@ server_id() {
 server_field() {
     scw baremetal server get "$1" zone="$ZONE" -o json 2>/dev/null \
         | python3 -c "import json,sys; print(json.load(sys.stdin).get('$2',''))" 2>/dev/null || true
+}
+
+# The OS install runs after the hardware is allocated, and has its own status.
+# The server-level one goes "ready" while install.status is still
+# "installing" - so waiting on the wrong field lands you at a half-built
+# machine whose host key changes under you a minute later.
+install_field() {
+    scw baremetal server get "$1" zone="$ZONE" -o json 2>/dev/null | python3 -c "
+import json, sys
+print((json.load(sys.stdin).get('install') or {}).get('$2', ''))
+" 2>/dev/null || true
 }
 
 server_ip() {
@@ -77,38 +88,76 @@ cmd_up() {
     # The key is uploaded to the project, not baked into an image, and is
     # injected at install time - so a fresh box is reachable the moment it
     # finishes installing, with no password anywhere.
-    local keys
-    keys="$(scw iam ssh-key list -o json | python3 -c 'import json,sys; print(",".join(k["id"] for k in json.load(sys.stdin)))')"
-    [ -n "$keys" ] || die "no SSH keys in this project.
-Add one first:  scw iam ssh-key create name=$(hostname -s) public-key=\"\$(cat ~/.ssh/id_ed25519.pub)\""
+    # scw wants array arguments indexed - install.ssh-key-ids.0=<id> - and
+    # rejects a comma-separated list with "missing index on the array". It
+    # fails before anything is rented, which is the good kind of failure.
+    local keyargs
+    keyargs="$(scw iam ssh-key list -o json 2>/dev/null | python3 -c '
+import json, sys
+keys = json.load(sys.stdin)
+print(" ".join("install.ssh-key-ids.%d=%s" % (i, k["id"]) for i, k in enumerate(keys)))
+' 2>/dev/null)"
+    [ -n "$keyargs" ] || die "no SSH keys in this project.
+Add one first:  scw iam ssh-key create name=mac public-key=\"\$(cat ~/.ssh/id_rsa.pub)\""
 
     cyan "==> renting $OFFER in $ZONE (~EUR $RATE/hour, billed until destroyed)"
-    id="$(scw baremetal server create zone="$ZONE" type="$OFFER" name="$TAG" tags.0="$TAG" \
-            install.os-id="$IMAGE" install.ssh-key-ids="$keys" -o json \
-          | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')" \
-        || die "could not create the server. Elastic Metal stock varies by zone -
-try another with KIWAMI_CLOUD_ZONE=fr-par-1, or check the console."
+    # The image is named, not an id: `scw baremetal os list` gives ids per
+    # zone, and the name is stable across them.
+    local os_id
+    os_id="$(scw baremetal os list zone="$ZONE" -o json 2>/dev/null | IMAGE="$IMAGE" python3 -c "
+import json, os, sys
+want = os.environ['IMAGE'].lower()
+for o in json.load(sys.stdin):
+    if want in (o.get('name','') + ' ' + o.get('version','')).lower():
+        print(o['id']); break
+" 2>/dev/null)"
+    [ -n "$os_id" ] || die "no image matching $IMAGE in $ZONE (see: scw baremetal os list zone=$ZONE)"
+
+    local created
+    # shellcheck disable=SC2086
+    created="$(scw baremetal server create zone="$ZONE" type="$OFFER" name="$TAG" tags.0="$TAG" \
+            install.os-id="$os_id" $keyargs -o json 2>&1)" || true
+    id="$(printf '%s' "$created" | python3 -c 'import json,sys
+try: print(json.load(sys.stdin)["id"])
+except Exception: pass' 2>/dev/null)"
+    [ -n "$id" ] || die "could not create the server:
+$created
+
+Elastic Metal stock varies by zone - try KIWAMI_CLOUD_ZONE=fr-par-1, and
+check that the account has a payment method and verified identity."
 
     cyan "==> installing $IMAGE (this takes a few minutes)"
     local state
-    for _ in $(seq 1 120); do
-        state="$(server_field "$id" status)"
-        [ "$state" = "ready" ] && break
+    for _ in $(seq 1 160); do
+        state="$(install_field "$id" status)"
+        [ "$state" = "completed" ] && break
         sleep 15
     done
-    [ "$state" = "ready" ] || die "the server never became ready (last state: $state)"
+    [ "$state" = "completed" ] || die "the OS never finished installing (last state: $state)"
 
-    local ip
+    local ip user
     ip="$(server_ip "$id")"
+    # Scaleway's images create an unprivileged user rather than enabling root
+    # logins - "ubuntu" here, but it is reported per install, so it is read
+    # rather than assumed.
+    user="$(install_field "$id" user)"
+    user="${user:-ubuntu}"
     cyan "==> $ip is up; setting it up"
-    until ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "root@$ip" true 2>/dev/null; do
+    # Rented addresses are recycled, and the host key changes when the OS is
+    # installed - so a pinned key from an earlier box (or from this one, mid
+    # install) makes every later connection fail closed with "host key
+    # verification failed". Forget it first: this is a machine that did not
+    # exist ten minutes ago and will not exist tomorrow, so there is no
+    # identity to pin.
+    ssh-keygen -R "$ip" >/dev/null 2>&1 || true
+    until ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 "$user@$ip" true 2>/dev/null; do
         sleep 5
     done
-    ssh "root@$ip" 'bash -s' < "$DIR/cloud-bootstrap.sh"
+    ssh "$user@$ip" 'sudo bash -s' < "$DIR/cloud-bootstrap.sh"
 
     echo
     cyan "==> ready"
-    echo "  ssh root@$ip"
+    echo "  ssh $user@$ip"
     echo "  just cloud-down     when you are finished - it bills until destroyed"
 }
 
@@ -146,8 +195,11 @@ cmd_ssh() {
     local id ip
     id="$(server_id)"; [ -n "$id" ] || die "no builder running (just cloud-up)"
     ip="$(server_ip "$id")"
+    local user
+    user="$(install_field "$id" user)"; user="${user:-ubuntu}"
     shift || true
-    if [ $# -gt 0 ]; then ssh "root@$ip" "$@"; else ssh "root@$ip"; fi
+    ssh-keygen -R "$ip" >/dev/null 2>&1 || true
+    if [ $# -gt 0 ]; then ssh "$user@$ip" "$@"; else ssh "$user@$ip"; fi
 }
 
 cmd_down() {
