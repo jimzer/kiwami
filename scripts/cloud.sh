@@ -41,10 +41,29 @@ It needs an API key from the Scaleway console under IAM > API keys."
         || die "scw is installed but not configured. Run: scw init"
 }
 
-# The server's id, or empty. Everything keys off this.
-server_id() {
-    scw baremetal server list zone="$ZONE" tags."0"="$TAG" -o json 2>/dev/null \
-        | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["id"] if d else "")' 2>/dev/null || true
+# Zones to look in. Stock moves around, so the box does not always end up
+# where the default says - and nothing records where it went. Searching by tag
+# across all of them means `status` and `down` cannot miss a running server,
+# which with hourly billing is the failure that actually costs money.
+ZONES="${KIWAMI_CLOUD_ZONES:-fr-par-1 fr-par-2 nl-ams-1 pl-waw-2}"
+
+# Sets SERVER_ID, and moves ZONE to wherever the server actually is. Not a
+# command substitution: this has to change ZONE for the caller, and a subshell
+# could not.
+SERVER_ID=""
+find_server() {
+    SERVER_ID=""
+    local z id
+    for z in $ZONES; do
+        id="$(scw baremetal server list zone="$z" tags."0"="$TAG" -o json 2>/dev/null \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["id"] if d else "")' 2>/dev/null || true)"
+        if [ -n "$id" ]; then
+            SERVER_ID="$id"
+            ZONE="$z"
+            return 0
+        fi
+    done
+    return 1
 }
 
 server_field() {
@@ -78,7 +97,8 @@ cmd_up() {
     need_scw
 
     local id
-    id="$(server_id)"
+    find_server || true
+    id="$SERVER_ID"
     if [ -n "$id" ]; then
         cyan "==> already up"
         cmd_status
@@ -164,7 +184,8 @@ check that the account has a payment method and verified identity."
 cmd_status() {
     need_scw
     local id
-    id="$(server_id)"
+    find_server || true
+    id="$SERVER_ID"
     if [ -z "$id" ]; then
         echo "no builder running"
         return 0
@@ -193,7 +214,8 @@ PY
 cmd_ssh() {
     need_scw
     local id ip
-    id="$(server_id)"; [ -n "$id" ] || die "no builder running (just cloud-up)"
+    find_server || true
+    id="$SERVER_ID"; [ -n "$id" ] || die "no builder running (just cloud-up)"
     ip="$(server_ip "$id")"
     local user
     user="$(install_field "$id" user)"; user="${user:-ubuntu}"
@@ -205,7 +227,8 @@ cmd_ssh() {
 cmd_down() {
     need_scw
     local id
-    id="$(server_id)"
+    find_server || true
+    id="$SERVER_ID"
     if [ -z "$id" ]; then
         echo "no builder running"
         return 0
@@ -229,7 +252,8 @@ snapshots, so the Nix store is gone and the next one starts cold."
 cmd_test() {
     need_scw
     local id ip user
-    id="$(server_id)"; [ -n "$id" ] || die "no builder running (just cloud-up)"
+    find_server || true
+    id="$SERVER_ID"; [ -n "$id" ] || die "no builder running (just cloud-up)"
     ip="$(server_ip "$id")"
     user="$(install_field "$id" user)"; user="${user:-ubuntu}"
     ssh-keygen -R "$ip" >/dev/null 2>&1 || true
