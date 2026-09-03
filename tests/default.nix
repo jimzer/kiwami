@@ -18,4 +18,9 @@ in
   installer = import ./installer.nix args;
   ephemeral = import ./ephemeral.nix args;
   luks = import ./luks.nix args;
+
+  # Not a test of Kiwami: it proves the sandbox escape hatch still works, so
+  # the decision to mock or not to mock rests on a fact rather than an
+  # assumption. Needs `sandbox = relaxed` on the builder.
+  network-escape = import ./network-escape.nix args;
 }

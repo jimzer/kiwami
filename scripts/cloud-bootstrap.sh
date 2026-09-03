@@ -68,6 +68,11 @@ max-jobs = auto
 # store costs minutes rather than the half hour it would at home. This is what
 # makes a machine with no persistent disk tolerable.
 substituters = https://cache.nixos.org
+# Permits __noChroot derivations, which is how a test VM gets real internet.
+# Hermetic is still the default and almost everything stays that way: a test
+# that can fail because a mirror hiccupped is one you stop believing. This
+# only opens the door for the few that ask.
+sandbox = relaxed
 CONF
 systemctl restart nix-daemon 2>/dev/null || true
 
