@@ -23,12 +23,27 @@ echo "    $(grep -cE '(vmx|svm)' /proc/cpuinfo) cores report virtualization, /de
 
 cyan "==> packages"
 export DEBIAN_FRONTEND=noninteractive
+# A freshly installed box is still running cloud-init and unattended-upgrades,
+# which hold the apt lock for the first minute or two. Racing them fails with
+# "Could not get lock", which reads like a broken image and is really just
+# arriving early - the same mistake the installer made with NetworkManager.
+if command -v cloud-init >/dev/null 2>&1; then
+    cloud-init status --wait >/dev/null 2>&1 || true
+fi
+for _ in $(seq 1 60); do
+    fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || break
+    sleep 5
+done
 apt-get update -qq
 # qemu for the tests, git because the flake is fetched, curl for the installer.
 apt-get install -y -qq curl git xz-utils qemu-system-x86 qemu-utils >/dev/null
 
 cyan "==> nix"
-if ! command -v nix >/dev/null 2>&1; then
+# The path, not the command: under sudo with a fresh shell nix is not on
+# PATH even when it is installed, so `command -v` says no and the installer
+# runs again - which then refuses, having found its own leftover backup of
+# /etc/bash.bashrc, and fails the whole bootstrap on a box that was fine.
+if [ ! -e /nix/var/nix/profiles/default/bin/nix ]; then
     # Single-user install: this box has exactly one user and is destroyed at
     # the end of the session, so the daemon buys nothing and the multi-user
     # installer is the fiddly one on a non-systemd-init container or a fresh
