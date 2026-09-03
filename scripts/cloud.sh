@@ -291,10 +291,17 @@ cmd_test() {
         echo "{ $build; echo \"KIWAMI_EXIT=\$?\"; } > $log 2>&1"
     } | ssh "${SSHOPTS[@]}" "$user@$ip" "cat > /tmp/kiwami-run.sh && chmod +x /tmp/kiwami-run.sh"
 
+    # tmux, not `setsid ... &`. Backgrounding inside an ssh command loses the
+    # process the moment the connection closes - the script was uploaded
+    # correctly, was never run, and the follower reported success against a
+    # log that did not exist. A tmux server outlives the session, and it also
+    # means you can watch a run yourself:
+    #
+    #     just cloud-ssh          then: tmux attach -t kiwami
     ssh "${SSHOPTS[@]}" "$user@$ip" \
-        "pkill -f 'nix build --no-link' 2>/dev/null; rm -f $log; \
-         setsid /tmp/kiwami-run.sh </dev/null >/dev/null 2>&1 & sleep 2; \
-         test -e $log && echo 'started' || echo 'NOT STARTED'"
+        "tmux kill-session -t kiwami 2>/dev/null; rm -f $log; \
+         tmux new-session -d -s kiwami /tmp/kiwami-run.sh; sleep 3; \
+         tmux has-session -t kiwami 2>/dev/null && echo started || echo 'NOT STARTED'"
 
     # Follow it. Reconnecting each poll rather than holding one long ssh, so a
     # network blip costs a few seconds of output rather than the whole run.

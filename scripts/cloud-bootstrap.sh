@@ -36,7 +36,9 @@ for _ in $(seq 1 60); do
 done
 apt-get update -qq
 # qemu for the tests, git because the flake is fetched, curl for the installer.
-apt-get install -y -qq curl git xz-utils qemu-system-x86 qemu-utils >/dev/null
+# tmux because a test run outlives the ssh session that started it: these are
+# minutes long, and a dropped connection must not take the build with it.
+apt-get install -y -qq curl git xz-utils tmux qemu-system-x86 qemu-utils >/dev/null
 
 cyan "==> nix"
 # The path, not the command: under sudo with a fresh shell nix is not on
