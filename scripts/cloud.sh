@@ -278,21 +278,32 @@ cmd_test() {
     # Detached, writing to a log on the builder. These runs are minutes long
     # and a dropped ssh would otherwise take the output with it - the build
     # keeps going, invisibly, and the next run collides with it.
+    #
+    # The command is sent as a script rather than quoted into the ssh line.
+    # Nesting single quotes inside a double-quoted remote command inside a
+    # local heredoc is how the first version silently ran nothing at all: no
+    # log, no process, and a follower that reported success immediately.
     cyan "==> $what, on $ip"
-    ssh "${SSHOPTS[@]}" "$user@$ip" "
-        pkill -f 'nix build --no-link' 2>/dev/null || true
-        rm -f '$log'
-        setsid bash -c '. /etc/profile.d/nix.sh 2>/dev/null; { $build; echo \"KIWAMI_EXIT=\$?\"; } > $log 2>&1' </dev/null >/dev/null 2>&1 &
-        sleep 1; echo started"
+    {
+        echo '#!/usr/bin/env bash'
+        echo '. /etc/profile.d/nix.sh 2>/dev/null || true'
+        echo ". ~/.nix-profile/etc/profile.d/nix.sh 2>/dev/null || true"
+        echo "{ $build; echo \"KIWAMI_EXIT=\$?\"; } > $log 2>&1"
+    } | ssh "${SSHOPTS[@]}" "$user@$ip" "cat > /tmp/kiwami-run.sh && chmod +x /tmp/kiwami-run.sh"
 
-    # Follow it. Reconnecting each time rather than holding one long ssh, so a
+    ssh "${SSHOPTS[@]}" "$user@$ip" \
+        "pkill -f 'nix build --no-link' 2>/dev/null; rm -f $log; \
+         setsid /tmp/kiwami-run.sh </dev/null >/dev/null 2>&1 & sleep 2; \
+         test -e $log && echo 'started' || echo 'NOT STARTED'"
+
+    # Follow it. Reconnecting each poll rather than holding one long ssh, so a
     # network blip costs a few seconds of output rather than the whole run.
     local seen=0 total exit_line
     while true; do
         total="$(ssh "${SSHOPTS[@]}" "$user@$ip" "wc -l < $log 2>/dev/null || echo 0")"
         total="${total//[^0-9]/}"; total="${total:-0}"
         if [ "$total" -gt "$seen" ]; then
-            ssh "${SSHOPTS[@]}" "$user@$ip" "tail -n +$((seen + 1)) $log | head -n $((total - seen))"
+            ssh "${SSHOPTS[@]}" "$user@$ip" "sed -n '$((seen + 1)),${total}p' $log"
             seen="$total"
         fi
         exit_line="$(ssh "${SSHOPTS[@]}" "$user@$ip" "grep -m1 '^KIWAMI_EXIT=' $log 2>/dev/null || true")"
