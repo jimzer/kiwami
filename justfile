@@ -95,6 +95,10 @@ cloud-up:
 cloud-status:
     @./scripts/cloud.sh status
 
+# Run the nixosTests on the builder:  just cloud-test ephemeral
+cloud-test *WHAT:
+    @./scripts/cloud.sh test {{WHAT}}
+
 # Shell on the builder:  just cloud-ssh 'nproc'
 cloud-ssh *CMD:
     @./scripts/cloud.sh ssh {{CMD}}

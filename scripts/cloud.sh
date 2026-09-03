@@ -224,10 +224,39 @@ snapshots, so the Nix store is gone and the next one starts cold."
     cyan "==> destroyed; billing stopped"
 }
 
+# Run the nixosTests up here, where they can actually run: nixosTest is QEMU
+# and needs /dev/kvm, which no Mac and no cheap VPS provides.
+cmd_test() {
+    need_scw
+    local id ip user
+    id="$(server_id)"; [ -n "$id" ] || die "no builder running (just cloud-up)"
+    ip="$(server_ip "$id")"
+    user="$(install_field "$id" user)"; user="${user:-ubuntu}"
+    ssh-keygen -R "$ip" >/dev/null 2>&1 || true
+
+    local what="${1:-}"
+    local flake="${KIWAMI_CLOUD_FLAKE:-github:jimzer/kiwami}"
+
+    # The flake is fetched from GitHub rather than pushed. Whatever is on the
+    # builder is then exactly what CI and a real install would get, and there
+    # is no copy step to go stale - which is how the last harness managed to
+    # test an ISO that predated the fix it was testing.
+    if [ -n "$what" ]; then
+        cyan "==> running checks.$what from $flake"
+        ssh "$user@$ip" ". ~/.nix-profile/etc/profile.d/nix.sh 2>/dev/null || . /etc/profile.d/nix.sh; \
+            nix build --no-link --print-build-logs '$flake#checks.x86_64-linux.$what'"
+    else
+        cyan "==> running every check from $flake"
+        ssh "$user@$ip" ". ~/.nix-profile/etc/profile.d/nix.sh 2>/dev/null || . /etc/profile.d/nix.sh; \
+            nix flake check --print-build-logs '$flake'"
+    fi
+}
+
 case "${1:-status}" in
     up) cmd_up ;;
+    test) shift || true; cmd_test "$@" ;;
     status) cmd_status ;;
     ssh) cmd_ssh "$@" ;;
     down) cmd_down ;;
-    *) die "usage: cloud.sh [up|status|ssh|down]" ;;
+    *) die "usage: cloud.sh [up|status|ssh|test|down]" ;;
 esac
