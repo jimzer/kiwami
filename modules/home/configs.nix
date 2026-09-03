@@ -25,8 +25,8 @@
   programs.git = {
     enable = true;
     settings = {
-      user.name = "Jimi Vaubien";
-      user.email = "jimi.vaubien@bitswired.com";
+      user.name = "jimzer";
+      user.email = "jimi.vaubien@protonmail.com";
       init.defaultBranch = "main";
       # A new branch pushes without having to name the remote first.
       push.autoSetupRemote = true;
