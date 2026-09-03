@@ -1,6 +1,8 @@
+mod auth;
 mod commands;
 mod doctor;
 mod install;
+mod host;
 mod net;
 mod nix;
 mod remote;
@@ -73,11 +75,37 @@ enum Cmd {
     },
     /// Report drift from the declared config, and check the desktop is healthy
     Doctor,
+    /// Show which tools still need a credential
+    Auth {
+        /// Log in to whatever is missing, one at a time
+        #[arg(long)]
+        login: bool,
+    },
+    /// This machine's entry in the flake
+    Host {
+        #[command(subcommand)]
+        action: HostCmd,
+    },
     /// Emit the actions the launcher should offer, as JSON
     Commands {
         /// Currently the only supported format; present so the shape is explicit.
         #[arg(long, default_value_t = true)]
         json: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum HostCmd {
+    /// Push this machine's hosts/<name>/ to a branch and open a pull request.
+    ///
+    /// The branch is built from origin/main with only that directory in it, so
+    /// unrelated local commits cannot be pushed by accident.
+    Push {
+        /// Which host. Defaults to this machine's hostname.
+        name: Option<String>,
+        /// Push the branch but do not open a pull request
+        #[arg(long)]
+        no_pr: bool,
     },
 }
 
@@ -148,6 +176,24 @@ fn main() -> std::process::ExitCode {
                 return std::process::ExitCode::FAILURE;
             }
         }
+        Cmd::Auth { login } => {
+            if let Err(e) = auth::run(login) {
+                // An empty message is the "gaps remain" case, already printed
+                // as a list. Only a real error is worth a second line.
+                if !e.is_empty() {
+                    eprintln!("auth: {e}");
+                }
+                return std::process::ExitCode::FAILURE;
+            }
+        }
+        Cmd::Host { action } => match action {
+            HostCmd::Push { name, no_pr } => {
+                if let Err(e) = host::push(name, no_pr) {
+                    eprintln!("host push: {e}");
+                    return std::process::ExitCode::FAILURE;
+                }
+            }
+        },
         Cmd::Passwd { user } => {
             if let Err(e) = passwd::run(user) {
                 eprintln!("passwd: {e}");

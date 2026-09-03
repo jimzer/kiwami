@@ -892,6 +892,14 @@ pub fn run() -> Result<(), ()> {
         }
     }
 
+    // Reported, never prompted for: doctor is safe to run anywhere and does
+    // not open browsers. It only says the gap exists and where to go.
+    let unauthenticated = crate::auth::missing_count();
+    if unauthenticated > 0 {
+        println!("\n\x1b[1mcredentials\x1b[0m");
+        println!("  {unauthenticated} tool(s) not authenticated - run `kiwami auth`");
+    }
+
     println!();
     if fails == 0 && warns == 0 {
         println!("\x1b[32mno problems\x1b[0m");
