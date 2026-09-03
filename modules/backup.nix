@@ -33,14 +33,29 @@ in
       description = "Back /persist up with restic";
       # Not wantedBy: the timer starts it. Running at boot would compete with
       # the desktop coming up for no benefit.
+      # Before `kiwami snapshot setup` there are no credentials, and the timer
+      # firing into that failed loudly every day. Skipping is the honest
+      # behaviour: nothing is wrong, it is simply not configured yet.
+      unitConfig.ConditionPathExists = cfg.credentialsFile;
+
       serviceConfig = {
         Type = "oneshot";
         EnvironmentFile = cfg.credentialsFile;
-        # Read-only for everything except restic's own cache: a backup job has
-        # no business being able to modify what it is reading.
+        # Read-only for everything except what restic genuinely writes: a
+        # backup job has no business being able to modify what it is reading.
         ProtectSystem = "strict";
-        ReadWritePaths = [ "/var/cache/restic" ];
         CacheDirectory = "restic";
+        # restic assembles pack files in TMPDIR before uploading them. Under
+        # ProtectSystem=strict /tmp is read-only, so the first real backup
+        # died on "read-only file system" partway through - after reporting
+        # that it had started. PrivateTmp gives it a writable tmpfs of its
+        # own, which is also the tidier answer: nothing it writes there
+        # outlives the run.
+        PrivateTmp = true;
+        # And it locates its cache through XDG_CACHE_HOME or HOME, neither of
+        # which a system unit has - CacheDirectory alone only creates the
+        # directory, it does not tell restic where to look.
+        Environment = [ "XDG_CACHE_HOME=/var/cache" ];
         Nice = 10;
         IOSchedulingClass = "idle";
       };
