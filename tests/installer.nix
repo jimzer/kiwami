@@ -92,12 +92,19 @@ pkgs.testers.nixosTest {
     # The sleep holds the write end open: without it the first `echo` closes
     # the fifo and the installer reads EOF, which it correctly treats as a
     # user who has stopped answering.
+    # Both sides start as transient units. A plain `cmd &` does not detach far
+    # enough: the test's shell channel waits on the job's file descriptors, and
+    # opening a fifo blocks until the other end appears - so the test hung on
+    # the very line meant to avoid hanging.
     machine.succeed("mkfifo /tmp/in")
-    machine.succeed("sleep 3600 > /tmp/in &")
     machine.succeed(
-        "KIWAMI_NET_PROBE=file:///etc/os-release "
-        "kiwami install --guided --flake /tmp/flake "
-        "< /tmp/in > /tmp/out 2>&1 &"
+        "systemd-run --unit=kiwami-fifo --collect --quiet "
+        "bash -c 'sleep 3600 > /tmp/in'"
+    )
+    machine.succeed(
+        "systemd-run --unit=kiwami-install --collect --quiet "
+        "--setenv=KIWAMI_NET_PROBE=file:///etc/os-release "
+        "bash -c 'kiwami install --guided --flake /tmp/flake < /tmp/in > /tmp/out 2>&1'"
     )
 
     def answer(text):
