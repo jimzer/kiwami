@@ -27,6 +27,11 @@
   # type a password at a greeter.
   kiwami.autoLogin = true;
 
+  # No GPU here: llvmpipe pays for every frame in software, and animation also
+  # makes the test screenshots nondeterministic - which is how the VM's answer
+  # became the default for real hardware in the first place.
+  kiwami.animations = false;
+
   # The point of this host.
   kiwami.ephemeralRoot = true;
 

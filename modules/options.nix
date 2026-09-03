@@ -289,6 +289,23 @@ in
       };
     };
 
+    animations = mkOption {
+      type = types.bool;
+      default = true;
+      description = ''
+        Hyprland's window animations.
+
+        On, because this is a desktop and it should feel like one. Off only
+        where there is no GPU to run them: a VM on llvmpipe pays for every
+        frame in software, and animations also make screenshots
+        nondeterministic, which is how the test VM ended up defining the
+        default for real hardware.
+
+        Read by config/hypr/hyprland.lua from a generated file, so changing it
+        is a rebuild rather than an edit to a config the flake owns.
+      '';
+    };
+
     autoLogin = mkOption {
       type = types.bool;
       default = false;

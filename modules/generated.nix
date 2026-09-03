@@ -47,6 +47,11 @@ in
   environment.etc = themeFiles // {
     "kiwami/bar.json".text = barManifest;
 
+    # Read by hyprland.lua. A lua file rather than a flag file so the config
+    # reads it the same way it reads the theme, and so the value is the value
+    # rather than the presence of a path.
+    "kiwami/animations.lua".text = "return ${if cfg.animations then "true" else "false"}\n";
+
     # The persist list, where the CLI can read it without evaluating Nix.
     # Where `kiwami passwd` writes. Generated so the CLI reads the option
     # rather than carrying its own copy of the path.

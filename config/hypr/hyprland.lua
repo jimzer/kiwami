@@ -13,6 +13,14 @@ if not ok or type(theme) ~= "table" then
   theme = { accent = "7ad07a", muted = "4b5a52" }
 end
 
+-- Generated from kiwami.animations. pcall for the same reason as the theme:
+-- a missing file should leave the compositor usable, and animating is the
+-- better thing to fall back to on a machine we know nothing about.
+local ok_anim, animations = pcall(dofile, "/etc/kiwami/animations.lua")
+if not ok_anim or type(animations) ~= "boolean" then
+  animations = true
+end
+
 hl.config {
   general = {
     gaps_in = 4,
@@ -24,10 +32,13 @@ hl.config {
   decoration = {
     rounding = 6,
   },
-  -- The dev VM has no GPU (llvmpipe). Animations are pointless there and
-  -- make screenshots nondeterministic.
+  -- On for real hardware, off where there is no GPU. Generated from
+  -- kiwami.animations, so a machine that should not animate says so in its
+  -- config rather than every machine inheriting the VM's answer - which is
+  -- what happened here: llvmpipe in the dev VM set the default for a laptop
+  -- with working Intel graphics.
   animations = {
-    enabled = false,
+    enabled = animations,
   },
   input = {
     kb_layout = "us",
