@@ -263,7 +263,7 @@ in
 
       userDirectories = mkOption {
         type = types.listOf types.str;
-        default = [ "kiwami" ".ssh" ".local/state" ];
+        default = [ "kiwami" ".ssh" ".local/state" "Projects" ];
         description = ''
           Paths under the desktop user's home that must survive, relative to
           it. They are stored in /persist/home/<user> and bound back.
@@ -278,6 +278,13 @@ in
           the desktop keeps between sessions. Without it the theme resets at
           every boot and `kiwami doctor` reports "no theme applied" on a
           machine that was themed yesterday.
+
+          ~/Projects is work in progress. It is mostly in git and mostly
+          pushed, but the part that matters is the part that is not:
+          uncommitted changes, stashes, .env files, scratch notes. That is
+          also what makes it the one entry here whose size is unbounded, which
+          is why `kiwami snapshot` excludes build output rather than trying to
+          be clever about what git already has.
         '';
       };
     };
