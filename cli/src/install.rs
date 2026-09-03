@@ -815,9 +815,11 @@ fn scaffold_host(host_dir: &Path, name: &str) -> Result<(), String> {
   boot.loader.efi.canTouchEfiVariables = true;
 
   # The account itself comes from modules/common.nix, which reads
-  # kiwami.user above. Only the password is set here - root is left locked by
-  # the install, so without this there is no way in.
-  users.users.{user}.initialPassword = "kiwami";
+  # kiwami.user above. The password is not set here: users are immutable, so
+  # the hash comes from kiwami.passwordFile, which activation seeds with the
+  # default and `kiwami passwd` replaces. Setting initialPassword as well is a
+  # conflict Nix only warns about, and the file wins - so the line would look
+  # like it set the password while doing nothing.
 
   home-manager.users.{user} = {{
     imports = [
