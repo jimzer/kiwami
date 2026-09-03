@@ -98,14 +98,21 @@ fn build_and_push(
 
     let branch = format!("host/{name}");
 
+    // Fetch the host branch by name rather than trusting remote-tracking refs
+    // to exist. `kiwami install` clones shallow and single-branch, so the
+    // configured refspec is main only and refs/remotes/origin/host/<name> is
+    // never created by a plain fetch - which left the check below unable to
+    // fire and --force-with-lease with no lease to compare, failing the second
+    // push with "stale info". The first test of this passed because it used an
+    // ordinary clone, which is the easier machine again.
+    let remote_branch = format!("origin/{branch}");
+    let refspec = format!("+refs/heads/{branch}:refs/remotes/{remote_branch}");
+    let on_remote = git(work, &["fetch", "--quiet", "origin", &refspec]).is_ok();
+
     // The base is origin/main, so a branch with an open pull request still
     // differs from it and would be pushed again on every run - a fresh commit
-    // with the same content, and a notification, for nothing. Compare against
-    // the branch as well before deciding there is work to do.
-    let remote_branch = format!("origin/{branch}");
-    if git(work, &["rev-parse", "--verify", "--quiet", &format!("{remote_branch}^{{commit}}")]).is_ok()
-        && git(work, &["diff", "--quiet", &remote_branch, "HEAD"]).is_ok()
-    {
+    // with the same content, and a notification, for nothing.
+    if on_remote && git(work, &["diff", "--quiet", &remote_branch, "HEAD"]).is_ok() {
         println!("\n{branch} already has exactly this - nothing to push");
         return Ok(());
     }
@@ -113,11 +120,17 @@ fn build_and_push(
     println!("\n==> pushing {branch}");
     // The branch is regenerated from origin/main every time, so it is expected
     // to be replaced rather than appended to. --force-with-lease still refuses
-    // if someone else moved it since the fetch above.
-    git(
-        work,
-        &["push", "--force-with-lease", "origin", &format!("HEAD:refs/heads/{branch}")],
-    )?;
+    // if someone else moved it since the fetch above - but only means anything
+    // when there is a remote-tracking ref to lease against, so a branch that
+    // does not exist yet is pushed plainly. That still refuses a non-fast
+    // -forward, so nothing is overwritten unseen either way.
+    let dest = format!("HEAD:refs/heads/{branch}");
+    let mut args = vec!["push"];
+    if on_remote {
+        args.push("--force-with-lease");
+    }
+    args.extend_from_slice(&["origin", &dest]);
+    git(work, &args)?;
 
     if no_pr {
         println!("\npushed. Open a pull request when you want it on {base}.");
