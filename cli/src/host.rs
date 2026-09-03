@@ -78,7 +78,7 @@ fn build_and_push(
     git(work, &["add", "--", rel])?;
     // Nothing staged means origin already has exactly these files.
     if git(work, &["diff", "--cached", "--quiet"]).is_ok() {
-        println!("\n{rel} on {base} already matches this machine - nothing to push");
+        println!("\n{rel} on {base} already has exactly this - nothing to push");
         return Ok(());
     }
 
@@ -97,6 +97,19 @@ fn build_and_push(
     git(work, &["commit", "--quiet", "-m", &subject, "-m", &body])?;
 
     let branch = format!("host/{name}");
+
+    // The base is origin/main, so a branch with an open pull request still
+    // differs from it and would be pushed again on every run - a fresh commit
+    // with the same content, and a notification, for nothing. Compare against
+    // the branch as well before deciding there is work to do.
+    let remote_branch = format!("origin/{branch}");
+    if git(work, &["rev-parse", "--verify", "--quiet", &format!("{remote_branch}^{{commit}}")]).is_ok()
+        && git(work, &["diff", "--quiet", &remote_branch, "HEAD"]).is_ok()
+    {
+        println!("\n{branch} already has exactly this - nothing to push");
+        return Ok(());
+    }
+
     println!("\n==> pushing {branch}");
     // The branch is regenerated from origin/main every time, so it is expected
     // to be replaced rather than appended to. --force-with-lease still refuses

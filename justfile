@@ -78,7 +78,12 @@ lint:
       exit $rc
 
 # Everything that can be verified without a Linux builder.
-check: lint eval
+check: lint host-push-test eval
+
+# `kiwami host push` sends the host directory and nothing else. Needs only git
+# and the built CLI, so it belongs here rather than in the VM matrix.
+host-push-test:
+    @./scripts/host-push-test.sh
 
 # Write an installer image to a removable drive, by name rather than by
 # /dev/diskN - which moves when you replug things.
