@@ -221,7 +221,8 @@ cmd_ssh() {
     user="$(install_field "$id" user)"; user="${user:-ubuntu}"
     shift || true
     ssh-keygen -R "$ip" >/dev/null 2>&1 || true
-    if [ $# -gt 0 ]; then ssh "$user@$ip" "$@"; else ssh "$user@$ip"; fi
+    local o=(-o StrictHostKeyChecking=accept-new)
+    if [ $# -gt 0 ]; then ssh "${o[@]}" "$user@$ip" "$@"; else ssh "${o[@]}" "$user@$ip"; fi
 }
 
 cmd_down() {
@@ -258,6 +259,13 @@ cmd_test() {
     user="$(install_field "$id" user)"; user="${user:-ubuntu}"
     ssh-keygen -R "$ip" >/dev/null 2>&1 || true
 
+    # accept-new every time, because the line above just forgot the key. The
+    # forgetting is deliberate - rented addresses are recycled and the key
+    # changes when the OS is installed - but dropping it without accepting the
+    # replacement just fails closed, which is how the first remote test run
+    # died before it started.
+    local SSHOPTS=(-o StrictHostKeyChecking=accept-new -o ConnectTimeout=15)
+
     local what="${1:-}"
     local flake="${KIWAMI_CLOUD_FLAKE:-github:jimzer/kiwami}"
 
@@ -267,12 +275,14 @@ cmd_test() {
     # test an ISO that predated the fix it was testing.
     if [ -n "$what" ]; then
         cyan "==> running checks.$what from $flake"
-        ssh "$user@$ip" ". ~/.nix-profile/etc/profile.d/nix.sh 2>/dev/null || . /etc/profile.d/nix.sh; \
-            nix build --no-link --print-build-logs '$flake#checks.x86_64-linux.$what'"
+        ssh "${SSHOPTS[@]}" "$user@$ip" \
+            ". /etc/profile.d/nix.sh 2>/dev/null || . ~/.nix-profile/etc/profile.d/nix.sh; \
+             nix build --no-link --print-build-logs '$flake#checks.x86_64-linux.$what'"
     else
         cyan "==> running every check from $flake"
-        ssh "$user@$ip" ". ~/.nix-profile/etc/profile.d/nix.sh 2>/dev/null || . /etc/profile.d/nix.sh; \
-            nix flake check --print-build-logs '$flake'"
+        ssh "${SSHOPTS[@]}" "$user@$ip" \
+            ". /etc/profile.d/nix.sh 2>/dev/null || . ~/.nix-profile/etc/profile.d/nix.sh; \
+             nix flake check --print-build-logs '$flake'"
     fi
 }
 
