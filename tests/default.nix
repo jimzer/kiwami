@@ -16,4 +16,5 @@ in
 {
   desktop = import ./desktop.nix args;
   installer = import ./installer.nix args;
+  ephemeral = import ./ephemeral.nix args;
 }
