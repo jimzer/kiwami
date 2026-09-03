@@ -106,25 +106,6 @@ jobs:
           path: result/iso/*.iso
           if-no-files-found: error
 
-  # The heavy VM tests: a full disko partitioning, an install, and a reboot
-  # each. Manual rather than on every push - they are minutes apiece, and the
-  # machine they are meant to run on is the rented builder (`just cloud-test`),
-  # where there is real KVM. Here they are the backstop that proves they still
-  # pass somewhere other than one laptop.
-  vm-tests:
-    name: vm tests
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        check: [installer, ephemeral, luks]
-    steps:
-      - uses: actions/checkout@v5
-      - uses: DeterminateSystems/nix-installer-action@main
-      - name: ${{ matrix.check }}
-        run: nix build --print-build-logs ".#checks.x86_64-linux.${{ matrix.check }}"
-
   # Boots the desktop in a VM and asserts the session actually comes up.
   # Needs a Linux host, which is the whole reason it lives here and not on
   # the development machine.

@@ -80,33 +80,6 @@ lint:
 # Everything that can be verified without a Linux builder.
 check: lint host-push-test eval
 
-# --- the rented builder ------------------------------------------------
-#
-# A bare-metal box by the hour, because macOS cannot build Linux derivations
-# and every cheap VPS has nested virtualization switched off - which nixosTest
-# needs, being QEMU. Created and destroyed per session: Elastic Metal has
-# neither snapshots nor persistent disks, so there is nothing to keep.
-
-# Rent a builder and set it up (idempotent - reuses one that is already up)
-cloud-up:
-    @./scripts/cloud.sh up
-
-# Is one running, for how long, and what has it cost
-cloud-status:
-    @./scripts/cloud.sh status
-
-# Run the nixosTests on the builder:  just cloud-test ephemeral
-cloud-test *WHAT:
-    @./scripts/cloud.sh test {{WHAT}}
-
-# Shell on the builder:  just cloud-ssh 'nproc'
-cloud-ssh *CMD:
-    @./scripts/cloud.sh ssh {{CMD}}
-
-# Destroy it. The disk goes with it; billing stops.
-cloud-down:
-    @./scripts/cloud.sh down
-
 # `kiwami host push` sends the host directory and nothing else. Needs only git
 # and the built CLI, so it belongs here rather than in the VM matrix.
 host-push-test:

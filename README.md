@@ -115,22 +115,13 @@ and boots x86_64, which is the architecture real hardware will use.
 
 ### Tests that need a Linux machine
 
-`tests/` holds the nixosTests: the desktop session, the installer
-conversation, the ephemeral root, encryption. They are QEMU, so they need
-`/dev/kvm` and cannot run on the Mac at all - which is what the older `vm/`
-harness worked around by driving a guest over a serial socket.
+`tests/` holds the desktop nixosTest, which CI runs on x86_64. Everything
+else that needs a VM - the installer conversation, the ephemeral root,
+encryption - is driven by `vm/`, which boots the real image on a real console.
 
-They run on a bare-metal box rented by the hour:
-
-```bash
-just cloud-up              # rent, install nix, verify /dev/kvm
-just cloud-test ephemeral  # or omit the name for all of them
-just cloud-status          # uptime and what it has cost
-just cloud-down            # destroy it - billing stops at deletion, not power-off
-```
-
-`vm/` stays until every one of these covers what it covered. A test that has
-not been replaced is not redundant.
+A rented bare-metal builder was tried and removed: the tests worth running
+already run in CI or on the Mac, and the one that seemed to need it turned out
+to be the one that should not have been a nixosTest at all.
 
 ## Layout
 
@@ -141,9 +132,9 @@ config/            hyprland.lua, ghostty config, theme palettes
 shell/             Quickshell QML
 cli/               kiwami: install, theme, doctor, commands
 hosts/             per-machine: choices + hardware facts
-tests/             nixosTests: desktop, installer, ephemeral root, encryption
-vm/                the older QEMU harness, kept until tests/ covers it
-scripts/           flashing, the rented builder, host push
+tests/             the desktop nixosTest, run by CI
+vm/                the development VM and its harness
+scripts/           flashing, host push
 docs/              notes worth keeping
 ```
 
