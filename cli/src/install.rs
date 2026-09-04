@@ -1663,9 +1663,15 @@ fn fetch_from_bitwarden(dest: &Path) -> Result<bool, String> {
     //
     // unlock first: on a machine that has already logged in, `login` refuses
     // rather than unlocking.
+    //
+    // The empty-session guard is not defensive programming for its own sake:
+    // `bw login --raw` was observed exiting 0 with no session at all when its
+    // input ended early, which would otherwise sail past the `||` and reach
+    // `--session ""` with a confusing error much later.
     let script = format!(
         "set -o pipefail\n\
          s=$(bw unlock --raw) || s=$(bw login --raw) || exit 1\n\
+         [ -n \"$s\" ] || exit 1\n\
          bw get notes {item} --session \"$s\" > {dest} || exit 1\n\
          bw lock >/dev/null 2>&1 || true\n",
         item = shell_quote(&item),
