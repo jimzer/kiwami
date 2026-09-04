@@ -19,12 +19,17 @@ WANT="${2:-Portable SSD T5}"
 [[ -f "$ISO" ]] || { echo "usage: flash-linux.sh <image.iso> [\"Media Model\"]"; exit 1; }
 
 # --- find every USB disk whose model matches --------------------------------
+# The model is last on purpose. `read a b c` puts everything after the second
+# word into c, so with NAME,MODEL,TRAN a multi-word model like "Samsung
+# Portable SSD T5" swallows the bus field and nothing ever matches - which is
+# exactly what happened, and the script correctly refused to guess rather than
+# picking a disk.
 matches=()
-while read -r name model tran; do
+while read -r name tran model; do
   [[ "$tran" == "usb" ]] || continue
   [[ "$model" == *"$WANT"* ]] || continue
   matches+=("/dev/$name")
-done < <(lsblk -dno NAME,MODEL,TRAN | awk '{name=$1; tran=$NF; $1=""; $NF=""; sub(/^ +/,""); sub(/ +$/,""); print name, $0, tran}')
+done < <(lsblk -dno NAME,TRAN,MODEL)
 
 # Deliberately the bus, not the "removable" flag. A Samsung T5 reports
 # removable=0 - it is an SSD in a box, not a memory stick - so the obvious
