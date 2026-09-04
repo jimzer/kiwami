@@ -33,15 +33,22 @@
     };
   };
 
-  # gh is deliberately not configured from here.
+  # gh's config.yml, from the flake. Its token lives in hosts.yml beside it,
+  # which is persisted instead - two halves of one directory, each with a
+  # single owner.
   #
-  # The tidy version of this split gave the flake config.yml and persisted
-  # hosts.yml beside it. gh does not agree: `gh auth login` writes
-  # git_protocol into config.yml, hit a read-only store symlink, and reported
-  # "gh did not complete" on a login that had in fact succeeded.
-  #
-  # config.yml is state that gh maintains, not configuration we impose, so it
-  # is persisted whole and gh owns it. The principle stands - what the flake
-  # owns, it owns completely - and the lesson is that the boundary belongs
-  # where the program puts it, not where the split looks neatest.
+  # `gh auth login` tries to write git_protocol here and cannot, because this
+  # is a read-only store symlink. That is cosmetic: the value it wants to
+  # write is the value already set. It exits non-zero anyway, which briefly
+  # made `kiwami auth` report failure on a login that had succeeded - fixed
+  # there, by checking whether the machine ended up authenticated rather than
+  # believing the exit code.
+  programs.gh = {
+    enable = true;
+    settings = {
+      # https, not ssh: the token gh already holds is then enough to push, so
+      # there is no key to place on a machine that wipes itself.
+      git_protocol = "https";
+    };
+  };
 }

@@ -263,7 +263,10 @@ in
 
       userDirectories = mkOption {
         type = types.listOf types.str;
-        default = [ "kiwami" ".ssh" ".local/state" "Projects" ];
+        # The real list lives in modules/common.nix. A default here would be
+        # silently discarded as soon as anything defined a value - which is
+        # exactly what happened, dropping ~/.ssh and ~/kiwami without a word.
+        default = [ ];
         description = ''
           Paths under the desktop user's home that must survive, relative to
           it. They are stored in /persist/home/<user> and bound back.

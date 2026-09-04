@@ -106,7 +106,23 @@ pub fn run(login: bool) -> Result<(), String> {
             .args(&p.login[1..])
             .status()
             .map_err(|e| format!("{}: {e}", p.login[0]))?;
-        if !status.success() {
+        // Judged on the outcome, not the exit code.
+        //
+        // `gh auth login` succeeds, then tries to write git_protocol into a
+        // config.yml the flake owns read-only, and exits non-zero. Believing
+        // that told you the login had failed while you were, in fact, logged
+        // in. Asking the tool what its state is now costs one call and cannot
+        // be wrong in that direction.
+        let now = providers()
+            .into_iter()
+            .find(|q| q.name == p.name)
+            .map(|q| matches!(q.state, State::Ok(_)))
+            .unwrap_or(false);
+        if now {
+            if !status.success() {
+                println!("    {} is authenticated (it exited non-zero anyway)", p.name);
+            }
+        } else {
             // One failure does not stop the walk. The point of the command is
             // to get through the list, and a tailnet login that was cancelled
             // should not hide that gh is still unauthenticated.

@@ -92,10 +92,34 @@
     "/etc/ssh/ssh_host_rsa_key.pub"
   ];
 
-  # gh's whole config directory. It writes config.yml itself during login, so
-  # splitting the directory between the flake and /persist meant a successful
-  # login reporting failure - see modules/home/configs.nix.
-  kiwami.persist.userDirectories = [ ".config/gh" ];
+  # The home paths that survive a wipe.
+  #
+  # Listed here in full rather than left to the option's default: a `default`
+  # is discarded the moment any module defines a value, so adding ".config/gh"
+  # on its own silently dropped ~/.ssh, ~/Projects and ~/kiwami - the checkout
+  # the machine rebuilds itself from. Nothing failed; the paths simply stopped
+  # being bound, and would have been gone at the next boot.
+  #
+  # ~/kiwami is the flake the machine rebuilds itself from. A machine that
+  # wipes its own configuration on first reboot is one you can no longer
+  # change.
+  #
+  # ~/.local/state holds the applied theme and other session state.
+  #
+  # ~/Projects is work in progress: mostly in git and mostly pushed, but the
+  # part that matters is the part that is not.
+  #
+  kiwami.persist.userDirectories = [
+    "kiwami"
+    ".ssh"
+    ".local/state"
+    "Projects"
+  ];
+
+  # gh's token, and deliberately nothing else from that directory. config.yml
+  # is written by the flake and state.yml is an update-check cache that should
+  # not outlive a boot, so each path in there has exactly one owner.
+  kiwami.persist.userFiles = [ ".config/gh/hosts.yml" ];
 
   # NetworkManager, not scripted DHCP. `kiwami net` drives nmcli, so without
   # this the command ships on every machine and works on none of them - and a
