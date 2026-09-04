@@ -9,6 +9,14 @@
 # anything internal or non-removable is refused outright.
 set -euo pipefail
 
+# The counterpart to the guard in flash-linux.sh: this drives diskutil, which
+# only exists here, and a script that writes to raw devices should say where it
+# runs rather than discovering it by failing.
+[[ "$(uname -s)" == "Darwin" ]] || {
+  echo "flash.sh only runs on macOS. On Linux use: scripts/flash-linux.sh <image>" >&2
+  exit 1
+}
+
 ISO="${1:-}"
 WANT="${2:-Portable SSD T5}"
 

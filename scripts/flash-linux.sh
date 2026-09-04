@@ -13,6 +13,16 @@
 # the USB bus is refused outright.
 set -euo pipefail
 
+# This writes to a raw block device, so it refuses to run anywhere it was not
+# meant to. Today it would fail on macOS anyway - no lsblk, no /dev/sda - but
+# that is luck rather than intent, and the cost of being wrong here is somebody
+# else's disk. Being explicit means the protection cannot quietly evaporate
+# because a tool got installed.
+[[ "$(uname -s)" == "Linux" ]] || {
+  echo "flash-linux.sh only runs on Linux. On macOS use: just flash <image>" >&2
+  exit 1
+}
+
 ISO="${1:-}"
 WANT="${2:-Portable SSD T5}"
 
