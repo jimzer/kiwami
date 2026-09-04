@@ -1652,8 +1652,27 @@ fn fetch_from_bitwarden(dest: &Path) -> Result<bool, String> {
         return Ok(false);
     }
 
-    let item = prompt("Note name [kiwami-backup]: ").map_err(|e| e.to_string())?;
-    let item = if item.trim().is_empty() { "kiwami-backup".to_string() } else { item };
+    // Three tries, because a mistyped note name is not a reason to lose the
+    // whole route. The first real run of this used a note called
+    // "kiwami-backups-xps" while the default assumed "kiwami-backup" - one
+    // wrong character would have dropped straight through to copying a file
+    // by hand, which is the thing all of this exists to avoid.
+    for attempt in 0..3 {
+        let item = prompt("Note name [kiwami-backup]: ").map_err(|e| e.to_string())?;
+        let item = if item.trim().is_empty() { "kiwami-backup".to_string() } else { item };
+        if try_bitwarden_note(&item, dest)? {
+            return Ok(true);
+        }
+        if attempt < 2 {
+            println!("    no note by that name - try again, or Ctrl-C to skip");
+        }
+    }
+    println!("    falling back");
+    Ok(false)
+}
+
+/// One attempt at one note name.
+fn try_bitwarden_note(item: &str, dest: &Path) -> Result<bool, String> {
 
     // bw prints the session key on stdout and its prompts on stderr, so the
     // command substitution captures the key while you still see what it is
@@ -1674,7 +1693,7 @@ fn fetch_from_bitwarden(dest: &Path) -> Result<bool, String> {
          [ -n \"$s\" ] || exit 1\n\
          bw get notes {item} --session \"$s\" > {dest} || exit 1\n\
          bw lock >/dev/null 2>&1 || true\n",
-        item = shell_quote(&item),
+        item = shell_quote(item),
         dest = shell_quote(&dest.to_string_lossy()),
     );
 
@@ -1691,7 +1710,6 @@ fn fetch_from_bitwarden(dest: &Path) -> Result<bool, String> {
     }
 
     let _ = fs::remove_file(dest);
-    println!("    Bitwarden did not produce the note - falling back");
     Ok(false)
 }
 
