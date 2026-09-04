@@ -183,6 +183,11 @@
                 # reinstall cheap. Without restic here that offer would fail at
                 # the last possible moment, after the disk was already erased.
                 pkgs.restic
+                # fix_boot_order reads and rewrites NVRAM from here rather than
+                # from inside the target, so the installed system does not have
+                # to have chosen to ship it - which, on real hardware, it had
+                # not.
+                pkgs.efibootmgr
                 # How the credentials get here without anything long being
                 # typed: one note holds the whole environment file. Unlocking a
                 # vault exposes all of it to whatever runs on the machine,

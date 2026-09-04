@@ -1944,8 +1944,19 @@ fn fix_boot_order() -> Result<(), String> {
         return Ok(());
     }
 
-    let out = Command::new("nixos-enter")
-        .args(["--root", "/mnt", "--", "efibootmgr"])
+    // efibootmgr from the installer, not from inside the target.
+    //
+    // This used to run through `nixos-enter`, which meant the installed system
+    // had to ship efibootmgr - and only the four VM hosts happen to declare
+    // it. On real hardware the command did not exist, the call failed, and
+    // this printed "leaving it alone" and moved on: a first reinstall left the
+    // previous install's dead entry first in the boot order, and the machine
+    // booted only because the firmware fell through the entries that no longer
+    // resolved.
+    //
+    // The installer already has the tool and the same NVRAM. Reading it here
+    // depends on nothing the target chose to install.
+    let out = Command::new("efibootmgr")
         .output()
         .map_err(|e| format!("efibootmgr: {e}"))?;
     if !out.status.success() {
@@ -1981,7 +1992,7 @@ fn fix_boot_order() -> Result<(), String> {
     let mut new = vec![entry.clone()];
     new.extend(order.into_iter().filter(|e| e != &entry));
     let joined = new.join(",");
-    run("nixos-enter", &["--root", "/mnt", "--", "efibootmgr", "-o", &joined, "-t", "1"])?;
+    run("efibootmgr", &["-o", &joined, "-t", "1"])?;
     println!("    boot order -> {joined} (Boot{entry} is this machine's ESP)");
     Ok(())
 }
