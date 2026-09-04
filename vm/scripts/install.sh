@@ -82,7 +82,18 @@ if "$DIR/vmssh" 'true' 2>/dev/null; then
 else
   REMOTE_SUM=$($CONSOLE run 'cd /tmp/kiwami && find flake.nix flake.lock hosts modules config shell cli/src -type f | sort | xargs cat | sha1sum | cut -d" " -f1' | tr -d '[:space:]')
 fi
-[[ "$LOCAL_SUM" == "$REMOTE_SUM" ]] || { echo "flake transfer corrupted ($LOCAL_SUM != $REMOTE_SUM)"; exit 1; }
+if [[ "$LOCAL_SUM" != "$REMOTE_SUM" ]]; then
+  # Two opaque hashes say only that something is wrong. Say which files, or
+  # the next person - which is to say me, at 2am - has to reconstruct this by
+  # hand from an installer that has already been torn down.
+  echo "flake transfer corrupted ($LOCAL_SUM != $REMOTE_SUM)"
+  LIST='find flake.nix flake.lock hosts modules config shell cli/src -type f | sort | xargs sha1sum'
+  local_files=$(cd "$VM_DIR/.." && eval "${LIST/sha1sum/shasum}" 2>/dev/null | awk '{print $2, $1}' | sort)
+  remote_files=$("$DIR/vmssh" "cd /tmp/kiwami && $LIST" 2>/dev/null | awk '{print $2, $1}' | sort)
+  echo "  files that differ (path, local, remote):"
+  diff <(echo "$local_files") <(echo "$remote_files") | head -20 | sed 's/^/    /'
+  exit 1
+fi
 echo "    checksum ok"
 
 if [[ -n "$PRE_INSTALL" ]]; then
