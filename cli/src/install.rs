@@ -1657,11 +1657,15 @@ fn fetch_from_bitwarden(dest: &Path) -> Result<bool, String> {
 
     // bw prints the session key on stdout and its prompts on stderr, so the
     // command substitution captures the key while you still see what it is
-    // asking. unlock first: on a machine that has already logged in, `login`
-    // refuses rather than unlocking.
+    // asking - stderr is inherited, so no redirect is needed and none is used:
+    // 2>/dev/tty would have added a way to fail on a console that does not
+    // have one.
+    //
+    // unlock first: on a machine that has already logged in, `login` refuses
+    // rather than unlocking.
     let script = format!(
         "set -o pipefail\n\
-         s=$(bw unlock --raw 2>/dev/tty) || s=$(bw login --raw 2>/dev/tty) || exit 1\n\
+         s=$(bw unlock --raw) || s=$(bw login --raw) || exit 1\n\
          bw get notes {item} --session \"$s\" > {dest} || exit 1\n\
          bw lock >/dev/null 2>&1 || true\n",
         item = shell_quote(&item),
