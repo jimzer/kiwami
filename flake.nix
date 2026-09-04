@@ -174,8 +174,15 @@
                 pkgs.git
                 # `kiwami remote` drives this. Present but not started: joining
                 # a tailnet is an explicit act, not something live media should
-                # do on its own.
+                # do on its own. It is also how the backup credentials reach
+                # this machine, by taildrop or scp, without anything long being
+                # typed.
                 pkgs.tailscale
+                # The installer offers to restore a previous machine's identity
+                # before the first boot, which is the thing that makes a
+                # reinstall cheap. Without restic here that offer would fail at
+                # the last possible moment, after the disk was already erased.
+                pkgs.restic
               ];
 
               systemd.services.tailscaled = {

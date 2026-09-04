@@ -29,6 +29,18 @@ const WORDS: &str = include_str!("../data/wordlist.txt");
 
 const CRED_DEFAULT: &str = "/var/lib/kiwami/backup/env";
 
+/// What a machine needs to come up as itself: the wifi it joins, the keys it
+/// is known by, the tokens it authenticates with. Deliberately short -
+/// anything not here can be fetched later, over a network that by then exists.
+pub const IDENTITY_PATHS: [&str; 6] = [
+    "/persist/etc",
+    "/persist/var/lib/NetworkManager",
+    "/persist/var/lib/tailscale",
+    "/persist/var/lib/kiwami",
+    "/persist/home/*/.ssh",
+    "/persist/home/*/.config/gh",
+];
+
 /// Plain lowercase words only. EFF's list contains "yo-yo", which would be
 /// ambiguous once the words are joined with hyphens - a passphrase you cannot
 /// unambiguously read back to yourself is a bad passphrase, however many bits
@@ -160,8 +172,17 @@ Type 'yes' to restore: ")?;
         }
     }
 
+    restore_with(CRED_DEFAULT, &target, identity_only)
+}
+
+/// The restore itself, with the credentials named.
+///
+/// Separate because the installer restores before the machine it is restoring
+/// onto exists: the credentials are sitting in /tmp having just arrived over
+/// the tailnet, and the target is /mnt rather than /.
+pub fn restore_with(cred: &str, target: &str, identity_only: bool) -> Result<(), String> {
     let mut args: Vec<String> =
-        ["restore", "latest", "--tag", "kiwami", "--target", &target]
+        ["restore", "latest", "--tag", "kiwami", "--target", target]
             .iter()
             .map(|s| s.to_string())
             .collect();
@@ -170,21 +191,14 @@ Type 'yes' to restore: ")?;
         // The paths that decide whether the machine comes up as itself. Kept
         // deliberately short: anything not here is recoverable later, once
         // there is a network and a shell to recover it from.
-        for p in [
-            "/persist/etc",
-            "/persist/var/lib/NetworkManager",
-            "/persist/var/lib/tailscale",
-            "/persist/var/lib/kiwami",
-            "/persist/home/*/.ssh",
-            "/persist/home/*/.config/gh",
-        ] {
+        for p in IDENTITY_PATHS {
             args.push("--include".into());
             args.push(p.into());
         }
     }
 
     let refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    restic(CRED_DEFAULT, &refs)?;
+    restic(cred, &refs)?;
     println!("
 restored into {target}");
     if identity_only {

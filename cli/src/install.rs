@@ -7,6 +7,7 @@
 use std::fmt;
 use std::fs;
 use std::io::{self, BufRead, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -487,6 +488,8 @@ pub fn run_install(opts: Options) -> Result<(), String> {
 
     println!("==> setting the boot order");
     fix_boot_order()?;
+
+    offer_restore(opts.guided, opts.assume_yes)?;
 
     // After nixos-install, so /mnt/home exists with the users the config
     // declares.
@@ -1565,6 +1568,101 @@ fn clone_flake(flake: &str, assume_yes: bool) -> Result<PathBuf, String> {
 /// So state goes to /mnt/persist/<path> when the target has a /persist, and
 /// to /mnt/<path> when it does not. Detected by looking rather than by asking
 /// the config: /persist being mounted is the fact that matters.
+/// Offer to put a previous machine's identity back, before the first boot.
+///
+/// This is the reason a reinstall is cheap. Without it a fresh machine comes
+/// up as a stranger: no wifi, no tailnet, no keys, no tokens - and every one
+/// of them has to be re-established by hand, from a browser, one at a time.
+/// `kiwami auth` will tell you what is missing, which is not the same as not
+/// having lost it.
+///
+/// Runs after the password seeding and the network carry-over, so what comes
+/// out of the backup wins over what the installer invented a minute ago.
+fn offer_restore(guided: bool, assume_yes: bool) -> Result<(), String> {
+    if !guided || assume_yes {
+        return Ok(());
+    }
+    let answer = prompt("\nRestore this machine from a backup? [y/N] ")
+        .map_err(|e| e.to_string())?;
+    if !answer.eq_ignore_ascii_case("y") {
+        return Ok(());
+    }
+
+    let cred = match wait_for_credentials()? {
+        Some(p) => p,
+        None => {
+            println!("    skipped - nothing arrived");
+            return Ok(());
+        }
+    };
+
+    // Into the target as well, so the installed machine already knows where
+    // its backups live and the daily timer works from the first boot. The
+    // alternative - restoring and then making you run setup again - would
+    // leave a machine that has its history back but is not adding to it.
+    let dest = target_state_path("var/lib/kiwami/backup/env");
+    if let Some(dir) = dest.parent() {
+        fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    fs::copy(&cred, &dest).map_err(|e| format!("{}: {e}", dest.display()))?;
+    let _ = fs::set_permissions(&dest, fs::Permissions::from_mode(0o600));
+
+    // /mnt, not /: the snapshot holds absolute /persist/... paths, so this
+    // lands them on the disk that was just formatted rather than on the live
+    // medium we are running from.
+    println!("\n==> restoring identity into /mnt/persist");
+    crate::snapshot::restore_with(&cred.to_string_lossy(), "/mnt", true)?;
+    println!("    wifi, keys, tailnet and tokens are back");
+    println!("    the rest follows after boot: sudo kiwami snapshot restore");
+    Ok(())
+}
+
+/// Wait for the backup credentials to arrive, by whichever route is easiest.
+///
+/// Three transports, one destination. There is no mode to choose because
+/// choosing is the part that is annoying at 1am on a machine with nothing on
+/// it: whichever of these you can do right now, do, and the installer notices.
+///
+/// Nothing long is ever typed. That was the whole design constraint - an R2
+/// secret is 64 random characters, and a person retyping it from a phone is
+/// the failure mode that made every earlier design bad.
+fn wait_for_credentials() -> Result<Option<PathBuf>, String> {
+    let dest = PathBuf::from("/tmp/kiwami-backup.env");
+    let host = std::process::Command::new("hostname")
+        .output()
+        .ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_else(|| "this machine".into());
+
+    println!("\nWaiting for kiwami-backup.env. Any one of:");
+    println!("  taildrop   send it from your phone; it gets collected here");
+    println!("  scp        scp backup.env {host}:/tmp/kiwami-backup.env");
+    println!("  by hand    write it to /tmp/kiwami-backup.env on another console");
+    println!("\nCtrl-C to skip the restore.\n");
+
+    // Ten minutes is long enough to find a phone and short enough that a
+    // forgotten install does not sit here forever.
+    for i in 0..120 {
+        if dest.is_file() {
+            println!("    got it");
+            return Ok(Some(dest));
+        }
+        // Taildrop does not write files by itself - they wait until something
+        // asks. Asking every few seconds is what makes "send it from your
+        // phone" work with no further instructions.
+        let _ = std::process::Command::new("tailscale")
+            .args(["file", "get", "/tmp"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        if i % 6 == 5 {
+            println!("    still waiting ({}s)", (i + 1) * 5);
+        }
+        std::thread::sleep(std::time::Duration::from_secs(5));
+    }
+    Ok(None)
+}
+
 fn target_state_path(rel: &str) -> PathBuf {
     let rel = rel.trim_start_matches('/');
     let persist = Path::new("/mnt/persist");
