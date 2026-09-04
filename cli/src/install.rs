@@ -491,12 +491,18 @@ pub fn run_install(opts: Options) -> Result<(), String> {
 
     offer_restore(opts.guided, opts.assume_yes)?;
 
-    // After nixos-install, so /mnt/home exists with the users the config
-    // declares.
-    if let Some(repo) = &checkout {
-        println!("==> placing the flake on the installed system");
-        place_checkout(repo, &flake, &host.name)?;
-    }
+    // Deliberately no checkout is placed on the installed machine.
+    //
+    // It used to copy one into ~/kiwami so the machine could rebuild itself.
+    // That copy was a second source of truth: it could be older than GitHub,
+    // older than the disk layout it described, or restored from a backup taken
+    // before that layout changed - and any of those silently reverts the
+    // machine's configuration at the next rebuild. It also only worked when
+    // installing from a local checkout, so installing from a flake URL left an
+    // empty directory and a machine that could not rebuild at all.
+    //
+    // `kiwami update` rebuilds from the flake on GitHub instead, and a
+    // workspace to hack in is an ordinary clone in ~/Projects.
 
     println!("\n==> done. Reboot into the installed system.");
     Ok(())
@@ -1793,13 +1799,6 @@ fn target_users(flake: &str, host: &str) -> Vec<String> {
     }
 }
 
-/// The uid a user will have on the installed system, read from its passwd.
-fn target_uid(user: &str) -> Option<u32> {
-    fs::read_to_string("/mnt/etc/passwd").ok()?.lines().find_map(|l| {
-        let mut f = l.split(':');
-        (f.next()? == user).then(|| f.nth(1)?.parse().ok())?
-    })
-}
 
 /// Give the new machine a password it can be logged into.
 ///
@@ -1860,49 +1859,7 @@ fn seed_password(flake: &str, host: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Put the flake on the installed system.
-///
-/// Without this the machine boots - the configuration was baked into the
-/// closure at install time - and then cannot be changed: the checkout the
-/// installer generated hardware.nix and disk.nix into lived on the
-/// installer's tmpfs and vanished at reboot, taking the only description of
-/// this machine's hardware with it.
-fn place_checkout(repo: &Path, flake: &str, host: &str) -> Result<(), String> {
-    let users = target_users(flake, host);
-    if users.is_empty() {
-        println!("    no normal user declared; leaving the flake at /root/kiwami");
-        return copy_into(repo, Path::new("/mnt/root/kiwami"), "root");
-    }
-    for user in &users {
-        let dest = target_state_path(&format!("home/{user}/kiwami"));
-        copy_into(repo, &dest, user)?;
-        println!("    ~{user}/kiwami");
-    }
-    Ok(())
-}
 
-fn copy_into(repo: &Path, dest: &Path, owner: &str) -> Result<(), String> {
-    fs::create_dir_all(dest).map_err(|e| e.to_string())?;
-    // cp -a rather than a hand-rolled walk: .git has to come too, or the
-    // machine arrives with an untracked tree that no flake command will read.
-    run("cp", &["-a", &format!("{}/.", repo.display()), &dest.to_string_lossy()])?;
-
-    // chown by numeric id rather than through nixos-enter: with an ephemeral
-    // root the destination is under /mnt/persist, which has no meaning inside
-    // the target's namespace - the path only exists as a bind mount that has
-    // not happened yet.
-    let uid = target_uid(owner).unwrap_or(1000);
-    let mut stack = vec![dest.to_path_buf()];
-    while let Some(p) = stack.pop() {
-        let _ = std::os::unix::fs::chown(&p, Some(uid), Some(100));
-        if p.is_dir() {
-            if let Ok(entries) = fs::read_dir(&p) {
-                stack.extend(entries.filter_map(|e| e.ok()).map(|e| e.path()));
-            }
-        }
-    }
-    Ok(())
-}
 
 /// Put the new system first in the firmware's boot order.
 ///

@@ -100,9 +100,15 @@
   # the machine rebuilds itself from. Nothing failed; the paths simply stopped
   # being bound, and would have been gone at the next boot.
   #
-  # ~/kiwami is the flake the machine rebuilds itself from. A machine that
-  # wipes its own configuration on first reboot is one you can no longer
-  # change.
+  # No ~/kiwami. The machine rebuilds from the flake on GitHub - `kiwami
+  # update` - and keeps no copy of its own configuration.
+  #
+  # Every bug in this area came from having one: a copy that could be older
+  # than GitHub, older than the disk it describes, or restored from a backup
+  # taken before a layout change, each able to revert the machine's config
+  # silently at the next rebuild. None of that is possible when the copy does
+  # not exist. Hacking on the config is a clone in ~/Projects like any other
+  # repository, which is a workspace rather than a second source of truth.
   #
   # ~/.local/state holds the applied theme and other session state.
   #
@@ -110,7 +116,6 @@
   # part that matters is the part that is not.
   #
   kiwami.persist.userDirectories = [
-    "kiwami"
     ".ssh"
     ".local/state"
     "Projects"

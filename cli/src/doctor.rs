@@ -303,6 +303,53 @@ fn generations() -> Finding {
     }
 }
 
+/// How far behind the flake this machine is.
+///
+/// The question the checkout used to answer, minus the checkout. `kiwami
+/// update` records the commit it built, so this compares that against what
+/// main points at now - which cannot go stale the way a directory could, and
+/// exists even on a machine that has never had a copy of its own config.
+fn commit_drift() -> Finding {
+    let Some(current) = crate::update::current_commit() else {
+        return Finding::new(
+            Level::Skip,
+            "no recorded commit - this system predates `kiwami update`",
+        );
+    };
+    let short = &current[..current.len().min(7)];
+
+    let out = std::process::Command::new("nix")
+        .args([
+            "--extra-experimental-features",
+            "nix-command flakes",
+            "flake",
+            "metadata",
+            "github:jimzer/kiwami",
+            "--refresh",
+            "--json",
+        ])
+        .output();
+    let Ok(out) = out else {
+        return Finding::new(Level::Ok, format!("running {short} (cannot reach the flake)"));
+    };
+    if !out.status.success() {
+        return Finding::new(Level::Ok, format!("running {short} (cannot reach the flake)"));
+    }
+    let head = serde_json::from_slice::<serde_json::Value>(&out.stdout)
+        .ok()
+        .and_then(|v| v.get("revision").and_then(|r| r.as_str()).map(String::from));
+
+    match head {
+        Some(head) if head == current => Finding::new(Level::Ok, format!("up to date ({short})")),
+        Some(head) => Finding::new(
+            Level::Warn,
+            format!("running {short}, main is {}", &head[..head.len().min(7)]),
+        )
+        .remedy("sudo kiwami update"),
+        None => Finding::new(Level::Ok, format!("running {short}")),
+    }
+}
+
 fn lock_age() -> Finding {
     let lock = paths::repo().join("flake.lock");
     let Ok(meta) = fs::metadata(&lock) else {
@@ -874,7 +921,7 @@ pub fn run() -> Result<(), ()> {
             shell_unit(),
             theme_applied(),
         ]),
-        ("hygiene", vec![generations(), lock_age(), hardware_drift(), root_was_wiped(), password_is_declarative(), unpersisted_state()]),
+        ("hygiene", vec![generations(), commit_drift(), lock_age(), hardware_drift(), root_was_wiped(), password_is_declarative(), unpersisted_state()]),
     ];
 
     let mut fails = 0;

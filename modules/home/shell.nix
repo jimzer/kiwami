@@ -25,7 +25,13 @@ let
     # The flake is the shell. A checkout is preferred only so that editing QML
     # during development is a restart (~0.8s) rather than a rebuild (~8s);
     # there is no user-override layer to merge.
-    tree="$HOME/kiwami/shell"
+    # A working copy if you have one, otherwise the flake's own.
+    #
+    # ~/Projects/kiwami rather than ~/kiwami: the machine no longer keeps a
+    # checkout of its own configuration - it rebuilds from the remote flake -
+    # so a clone here is a workspace like any other repository, not a second
+    # source of truth for what this machine is.
+    tree="$HOME/Projects/kiwami/shell"
     [ -f "$tree/shell.qml" ] || tree=/etc/kiwami/shell
     echo "kiwami-shell: $tree"
     exec ${lib.getExe quickshell} -p "$tree"

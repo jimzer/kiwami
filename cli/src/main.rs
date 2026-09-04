@@ -10,6 +10,7 @@ mod passwd;
 mod snapshot;
 mod paths;
 mod theme;
+mod update;
 
 use clap::{Parser, Subcommand};
 
@@ -80,6 +81,16 @@ enum Cmd {
     Auth {
         #[command(subcommand)]
         action: Option<AuthCmd>,
+    },
+    /// Rebuild this machine from the flake on GitHub
+    Update {
+        /// Build an exact commit instead of the newest one - to roll back, or
+        /// to put two machines on the same system.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Build it without switching
+        #[arg(long)]
+        dry: bool,
     },
     /// Back /persist up, and put it back
     Snapshot {
@@ -224,6 +235,12 @@ fn main() -> std::process::ExitCode {
                 if !e.is_empty() {
                     eprintln!("auth: {e}");
                 }
+                return std::process::ExitCode::FAILURE;
+            }
+        }
+        Cmd::Update { commit, dry } => {
+            if let Err(e) = update::run(commit, dry) {
+                eprintln!("update: {e}");
                 return std::process::ExitCode::FAILURE;
             }
         }
