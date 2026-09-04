@@ -54,7 +54,13 @@ model=$(lsblk -dno MODEL "$target")
 # The root filesystem's disk, whatever it is called today. Being on the USB
 # bus should already have excluded it, but the cost of being wrong here is the
 # machine, so it is checked rather than assumed.
-root_disk=$(lsblk -no PKNAME "$(findmnt -no SOURCE /)" 2>/dev/null | head -1)
+# The subvolume has to be stripped first. On btrfs `findmnt -no SOURCE /`
+# answers /dev/nvme0n1p2[/@root], which lsblk cannot parse - it exits 32, and
+# under set -e that killed the script *inside the safety check*, before
+# anything was written. The guard meant to protect this machine was defeated
+# by this machine's own disk layout, and reported nothing while doing it.
+root_src=$(findmnt -no SOURCE / | sed 's/\[.*\]//')
+root_disk=$(lsblk -no PKNAME "$root_src" 2>/dev/null | head -1 || true)
 if [[ -n "$root_disk" && "$target" == "/dev/$root_disk" ]]; then
   echo "$target is the disk this system is running from. Refusing."
   exit 1
