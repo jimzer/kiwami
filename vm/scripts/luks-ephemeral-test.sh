@@ -60,6 +60,12 @@ ssh_ 'sudo touch /ephemeral-marker && sudo touch /persist/persistent-marker' >/d
   && ok "both markers written" || no "both markers written"
 
 echo "  rebooting (the passphrase has to be typed again)..."
+# The console buffer is seeded from serial.log, which still holds the *first*
+# boot's passphrase prompt - so expect() matches it instantly, the passphrase
+# goes out before the new prompt exists, and the machine sits waiting forever
+# while the test reports that it asked and was answered. Truncating the log
+# means the next match can only come from this boot.
+: > "$VM_DIR/serial.log"
 ssh_ 'sudo systemctl reboot' >/dev/null 2>&1 || true
 sleep 5
 
@@ -80,15 +86,29 @@ else
 fi
 
 for _ in $(seq 1 60); do ssh_ true && break; sleep 5; done
-ssh_ true && ok "it came back after the reboot" || no "it came back after the reboot"
+if ssh_ true; then
+  ok "it came back after the reboot"
 
-ssh_ 'test -e /ephemeral-marker' \
-  && no "the root marker is gone - the root was wiped" \
-  || ok "the root marker is gone - the root was wiped"
-ssh_ 'test -e /persist/persistent-marker' \
-  && ok "the persist marker survived" || no "the persist marker survived"
-ssh_ 'findmnt -no SOURCE /var/lib/nixos | grep -q persist' \
-  && ok "declared state is bound back after the wipe" || no "declared state is bound back after the wipe"
+  # Only asked once the machine is reachable.
+  #
+  # `ssh_ 'test -e /ephemeral-marker' || ok "the marker is gone"` scored a
+  # pass on a machine that never booted: ssh failed, the || fired, and an
+  # unreachable machine reported a successful wipe. The absence of an answer
+  # is not the answer - which is the whole failure mode this suite exists to
+  # catch, reproduced in the suite itself.
+  ssh_ 'test -e /ephemeral-marker' \
+    && no "the root marker is gone - the root was wiped" \
+    || ok "the root marker is gone - the root was wiped"
+  ssh_ 'test -e /persist/persistent-marker' \
+    && ok "the persist marker survived" || no "the persist marker survived"
+  ssh_ 'findmnt -no SOURCE /var/lib/nixos | grep -q persist' \
+    && ok "declared state is bound back after the wipe" || no "declared state is bound back after the wipe"
+else
+  no "it came back after the reboot"
+  no "the wipe could not be checked - the machine never came up"
+  echo "     last console output:"
+  tail -c 1200 "$VM_DIR/serial.log" | tr '\r' '\n' | grep -v "^\s*$" | tail -8 | sed 's/^/     /'
+fi
 
 echo
 if [[ $fail -eq 0 ]]; then
