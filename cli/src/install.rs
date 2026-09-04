@@ -1588,11 +1588,16 @@ fn offer_restore(guided: bool, assume_yes: bool) -> Result<(), String> {
         return Ok(());
     }
 
-    let cred = match wait_for_credentials()? {
-        Some(p) => p,
-        None => {
-            println!("    skipped - nothing arrived");
-            return Ok(());
+    let dest = PathBuf::from("/tmp/kiwami-backup.env");
+    let cred = if fetch_from_bitwarden(&dest)? {
+        dest
+    } else {
+        match wait_for_credentials()? {
+            Some(p) => p,
+            None => {
+                println!("    skipped - nothing arrived");
+                return Ok(());
+            }
         }
     };
 
@@ -1617,44 +1622,112 @@ fn offer_restore(guided: bool, assume_yes: bool) -> Result<(), String> {
     Ok(())
 }
 
-/// Wait for the backup credentials to arrive, by whichever route is easiest.
+/// Read the credentials out of a Bitwarden note.
 ///
-/// Three transports, one destination. There is no mode to choose because
-/// choosing is the part that is annoying at 1am on a machine with nothing on
-/// it: whichever of these you can do right now, do, and the installer notices.
+/// The point is that nothing long gets typed. An R2 secret is 64 random
+/// characters, and a person retyping it from a phone at 1am is the failure
+/// mode that made every earlier version of this design bad - a memorable
+/// master password is the trade, and it is a good one.
 ///
-/// Nothing long is ever typed. That was the whole design constraint - an R2
-/// secret is 64 random characters, and a person retyping it from a phone is
-/// the failure mode that made every earlier design bad.
+/// The usual objection to `bw` is blast radius: unlocking derives a session
+/// key that decrypts the whole vault, so anything running as you can read
+/// every secret you own. That is a real concern on a daily driver and a much
+/// smaller one here - this is live media running only what we shipped, the
+/// session lives in tmpfs, and the machine is minutes from being wiped. The
+/// vault is locked again the moment the note has been read.
+///
+/// One note holds the whole environment file:
+///
+///     RESTIC_REPOSITORY=s3:https://...
+///     RESTIC_PASSWORD=...
+///     AWS_ACCESS_KEY_ID=...
+///     AWS_SECRET_ACCESS_KEY=...
+fn fetch_from_bitwarden(dest: &Path) -> Result<bool, String> {
+    if !have_cmd("bw") {
+        return Ok(false);
+    }
+    let answer = prompt("\nFetch the credentials from Bitwarden? [Y/n] ")
+        .map_err(|e| e.to_string())?;
+    if answer.eq_ignore_ascii_case("n") {
+        return Ok(false);
+    }
+
+    let item = prompt("Note name [kiwami-backup]: ").map_err(|e| e.to_string())?;
+    let item = if item.trim().is_empty() { "kiwami-backup".to_string() } else { item };
+
+    // bw prints the session key on stdout and its prompts on stderr, so the
+    // command substitution captures the key while you still see what it is
+    // asking. unlock first: on a machine that has already logged in, `login`
+    // refuses rather than unlocking.
+    let script = format!(
+        "set -o pipefail\n\
+         s=$(bw unlock --raw 2>/dev/tty) || s=$(bw login --raw 2>/dev/tty) || exit 1\n\
+         bw get notes {item} --session \"$s\" > {dest} || exit 1\n\
+         bw lock >/dev/null 2>&1 || true\n",
+        item = shell_quote(&item),
+        dest = shell_quote(&dest.to_string_lossy()),
+    );
+
+    let status = Command::new("bash").arg("-c").arg(&script).status();
+    let ok = matches!(status, Ok(st) if st.success())
+        && dest.metadata().map(|m| m.len() > 0).unwrap_or(false);
+
+    if ok {
+        // 0600 before anything else touches it: the note is the whole
+        // credential set, and /tmp on live media is world-readable.
+        let _ = fs::set_permissions(dest, fs::Permissions::from_mode(0o600));
+        println!("    got the credentials from Bitwarden");
+        return Ok(true);
+    }
+
+    let _ = fs::remove_file(dest);
+    println!("    Bitwarden did not produce the note - falling back");
+    Ok(false)
+}
+
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
+fn have_cmd(cmd: &str) -> bool {
+    Command::new("sh")
+        .args(["-c", &format!("command -v {cmd}")])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Wait for the credentials to be copied in, when Bitwarden is not the route.
+///
+/// One fallback, not a menu: scp from a machine that already has them, over
+/// the tailnet this installer just joined. Taildrop was considered and
+/// dropped - it needs enabling on the tailnet, files have to be collected
+/// rather than arriving, and it only moves files, so the credentials would
+/// have to already exist as a file on the phone rather than as the vault item
+/// they actually live in.
 fn wait_for_credentials() -> Result<Option<PathBuf>, String> {
     let dest = PathBuf::from("/tmp/kiwami-backup.env");
-    let host = std::process::Command::new("hostname")
+    let host = Command::new("hostname")
         .output()
         .ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_else(|| "this machine".into());
+        .filter(|h| !h.is_empty())
+        .unwrap_or_else(|| "this-machine".into());
 
-    println!("\nWaiting for kiwami-backup.env. Any one of:");
-    println!("  taildrop   send it from your phone; it gets collected here");
-    println!("  scp        scp backup.env {host}:/tmp/kiwami-backup.env");
-    println!("  by hand    write it to /tmp/kiwami-backup.env on another console");
+    println!("\nWaiting for the credentials. From a machine that has them:");
+    println!("\n  scp backup.env {host}:/tmp/kiwami-backup.env");
     println!("\nCtrl-C to skip the restore.\n");
 
-    // Ten minutes is long enough to find a phone and short enough that a
-    // forgotten install does not sit here forever.
+    // Ten minutes: long enough to go and find the other machine, short enough
+    // that an abandoned install does not sit here forever.
     for i in 0..120 {
         if dest.is_file() {
+            let _ = fs::set_permissions(&dest, fs::Permissions::from_mode(0o600));
             println!("    got it");
             return Ok(Some(dest));
         }
-        // Taildrop does not write files by itself - they wait until something
-        // asks. Asking every few seconds is what makes "send it from your
-        // phone" work with no further instructions.
-        let _ = std::process::Command::new("tailscale")
-            .args(["file", "get", "/tmp"])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
         if i % 6 == 5 {
             println!("    still waiting ({}s)", (i + 1) * 5);
         }

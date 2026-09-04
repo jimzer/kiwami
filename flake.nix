@@ -183,6 +183,12 @@
                 # reinstall cheap. Without restic here that offer would fail at
                 # the last possible moment, after the disk was already erased.
                 pkgs.restic
+                # How the credentials get here without anything long being
+                # typed: one note holds the whole environment file. Unlocking a
+                # vault exposes all of it to whatever runs on the machine,
+                # which is a real objection on a daily driver and a small one
+                # on live media that is minutes from being wiped.
+                pkgs.bitwarden-cli
               ];
 
               systemd.services.tailscaled = {
