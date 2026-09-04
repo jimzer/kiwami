@@ -73,21 +73,27 @@ else
   $CONSOLE run 'base64 -d /tmp/k.b64 | tar xzf - -C /tmp/kiwami' >/dev/null
 fi
 
-LOCAL_SUM=$(cd "$VM_DIR/.." && find flake.nix flake.lock hosts modules config shell cli/src -type f | sort | xargs cat | shasum | cut -d' ' -f1)
+# LC_ALL=C on both sides. The checksum concatenates every file in sorted
+# order, and sort is locale-dependent: macOS weights punctuation differently
+# from the C locale the VM uses, so shell/shell.qml lands on either side of
+# shell/widgets/ depending on which machine is asking. Identical files, in a
+# different order, hashing differently - and the failure reads as "transfer
+# corrupted" on a transfer that was perfect.
+LOCAL_SUM=$(cd "$VM_DIR/.." && find flake.nix flake.lock hosts modules config shell cli/src -type f | LC_ALL=C sort | xargs cat | shasum | cut -d' ' -f1)
 # The checksum stays for both paths. Over ssh corruption is unlikely, but the
 # point is that the tree being installed is the tree on this machine, and that
 # is worth asserting however it got there.
 if "$DIR/vmssh" 'true' 2>/dev/null; then
-  REMOTE_SUM=$("$DIR/vmssh" 'cd /tmp/kiwami && find flake.nix flake.lock hosts modules config shell cli/src -type f | sort | xargs cat | sha1sum | cut -d" " -f1' | tr -d '[:space:]')
+  REMOTE_SUM=$("$DIR/vmssh" 'cd /tmp/kiwami && find flake.nix flake.lock hosts modules config shell cli/src -type f | LC_ALL=C sort | xargs cat | sha1sum | cut -d" " -f1' | tr -d '[:space:]')
 else
-  REMOTE_SUM=$($CONSOLE run 'cd /tmp/kiwami && find flake.nix flake.lock hosts modules config shell cli/src -type f | sort | xargs cat | sha1sum | cut -d" " -f1' | tr -d '[:space:]')
+  REMOTE_SUM=$($CONSOLE run 'cd /tmp/kiwami && find flake.nix flake.lock hosts modules config shell cli/src -type f | LC_ALL=C sort | xargs cat | sha1sum | cut -d" " -f1' | tr -d '[:space:]')
 fi
 if [[ "$LOCAL_SUM" != "$REMOTE_SUM" ]]; then
   # Two opaque hashes say only that something is wrong. Say which files, or
   # the next person - which is to say me, at 2am - has to reconstruct this by
   # hand from an installer that has already been torn down.
   echo "flake transfer corrupted ($LOCAL_SUM != $REMOTE_SUM)"
-  LIST='find flake.nix flake.lock hosts modules config shell cli/src -type f | sort | xargs sha1sum'
+  LIST='find flake.nix flake.lock hosts modules config shell cli/src -type f | LC_ALL=C sort | xargs sha1sum'
   local_files=$(cd "$VM_DIR/.." && eval "${LIST/sha1sum/shasum}" 2>/dev/null | awk '{print $2, $1}' | sort)
   remote_files=$("$DIR/vmssh" "cd /tmp/kiwami && $LIST" 2>/dev/null | awk '{print $2, $1}' | sort)
   echo "  files that differ (path, local, remote):"
