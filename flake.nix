@@ -205,6 +205,19 @@
               users.users.nixos.openssh.authorizedKeys.keys =
                 lib.optionals testKey harnessKey;
 
+              # The harness drives this image by typing at the serial console,
+              # which means it needs a shell there - and the installer now
+              # takes that console for itself, which is right for a headless
+              # machine and fatal for a test that has to run `kiwami install`
+              # with flags.
+              #
+              # Pre-creating the marker the autostart already checks turns it
+              # off without a second mechanism to keep in step. Only on the
+              # -test image: the real one must start on its own, which is the
+              # whole point of it.
+              systemd.tmpfiles.rules =
+                lib.optional testKey "f /tmp/.kiwami-installer-started 0644 root root -";
+
               # The installer shells out to `nix build` for the disko script,
               # and the stock ISO does not enable flakes.
               nix.settings.experimental-features = [ "nix-command" "flakes" ];
