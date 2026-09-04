@@ -70,9 +70,16 @@ read -rp "Type 'yes' to write it: " answer
 
 # Unmount anything that got automounted, or dd writes underneath a mounted
 # filesystem and the kernel keeps serving the old contents from cache.
+# `[[ ... ]] && { ... }` would be wrong here: as the last statement in the loop
+# body it returns non-zero whenever the partition is not mounted, and set -e
+# then kills the script - which it did, with exit 32 and no output at all,
+# looking exactly like a umount failure.
 for part in $(lsblk -lno NAME "$target" | tail -n +2); do
   mountpoint=$(findmnt -no TARGET "/dev/$part" 2>/dev/null || true)
-  [[ -n "$mountpoint" ]] && { echo "  unmounting /dev/$part"; sudo umount "/dev/$part"; }
+  if [[ -n "$mountpoint" ]]; then
+    echo "  unmounting /dev/$part from $mountpoint"
+    sudo umount "/dev/$part"
+  fi
 done
 
 echo "==> writing"
