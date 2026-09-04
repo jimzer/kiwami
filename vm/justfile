@@ -85,6 +85,12 @@ luks-test: fetch-iso
 ephemeral-test: fetch-iso
     ./scripts/ephemeral-test.sh
 
+# Both at once. They were built separately and never ran together, which hid
+# the rollback naming the root partition on a machine whose filesystem lives
+# inside a LUKS container.
+luks-ephemeral-test: fetch-iso
+    ./scripts/luks-ephemeral-test.sh
+
 # Drive the guided installer from a cold boot the way a person does. Stops at
 # the confirmation, so it never installs: every guided-flow bug so far was in
 # the conversation, before anything was written.

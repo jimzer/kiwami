@@ -9,7 +9,7 @@
 #
 # Only active when kiwami.ephemeralRoot is set, which requires a disk layout
 # with the right subvolumes - see hosts/vm-ephemeral/disk.nix.
-{ config, lib, pkgs, inputs, ... }:
+{ config, lib, pkgs, inputs, utils, ... }:
 
 let
   cfg = config.kiwami;
@@ -56,8 +56,12 @@ in
     boot.initrd.systemd.services.rollback = {
       description = "Roll the root subvolume back to a blank snapshot";
       wantedBy = [ "initrd.target" ];
-      after = [ "dev-disk-by\\x2dpartlabel-disk\\x2dsystem\\x2droot.device" ];
-      requires = [ "dev-disk-by\\x2dpartlabel-disk\\x2dsystem\\x2droot.device" ];
+      # Derived from kiwami.rootDevice rather than spelled out, because on an
+      # encrypted machine the device is /dev/mapper/<name> and only exists
+      # after the container is unlocked - waiting on the partition instead
+      # would run the rollback against a LUKS blob.
+      after = [ "${utils.escapeSystemdPath cfg.rootDevice}.device" ];
+      requires = [ "${utils.escapeSystemdPath cfg.rootDevice}.device" ];
       before = [ "sysroot.mount" ];
       unitConfig.DefaultDependencies = "no";
       serviceConfig.Type = "oneshot";
@@ -68,7 +72,7 @@ in
         # anywhere to write a log that would survive the boot it is part of.
         echo "rollback: mounting the btrfs top level"
         mkdir -p /mnt-btrfs
-        mount -t btrfs -o subvol=/ /dev/disk/by-partlabel/disk-system-root /mnt-btrfs
+        mount -t btrfs -o subvol=/ ${cfg.rootDevice} /mnt-btrfs
 
         # Keep exactly one previous root, so "what did I forget to persist" is
         # a diff against a real filesystem rather than a guess. Only one,

@@ -90,6 +90,28 @@ in
       '';
     };
 
+    rootDevice = mkOption {
+      type = types.str;
+      default = "/dev/disk/by-partlabel/disk-system-root";
+      description = ''
+        The block device holding the btrfs filesystem whose subvolumes make up
+        the root.
+
+        The rollback runs in the initrd and has to mount the filesystem's top
+        level before anything else has it, so it needs the device by name -
+        and on an encrypted machine that name is not the partition. It is
+        /dev/mapper/<name>, which only exists once the container is unlocked.
+
+        Encryption and the ephemeral root were built separately and never ran
+        together: the rollback named the partition unconditionally, so on an
+        encrypted machine it would have tried to mount a LUKS container as
+        btrfs, failed in the initrd, and dropped the machine into emergency
+        mode on the first boot after installing. Which is the most expensive
+        moment to find out.
+      '';
+      example = "/dev/mapper/cryptroot";
+    };
+
     passwordFile = mkOption {
       type = types.str;
       default = "/var/lib/kiwami/passwords";
