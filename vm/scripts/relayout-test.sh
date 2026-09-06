@@ -53,7 +53,12 @@ step "running the wizard for a host that already declares its disks"
 # Answers, in order: which disk, /home elsewhere, encrypt, then abort at the
 # review. Fed on stdin rather than typed at the console - the prompts read
 # stdin, and this keeps the test deterministic.
+# sudo, because vmssh lands as the unprivileged installer user and the
+# installer refuses without root - it enumerates disks and is about to erase
+# one. `sudo env` rather than -E: sudo strips the environment, and nix needs
+# its experimental features flag to run a flake.
 "$DIR/vmssh" "cd /tmp && printf '1\\nn\\ny\\na\\n' | \
+  sudo env NIX_CONFIG='experimental-features = nix-command flakes' \
   nix run /tmp/kiwami#kiwami -- install --host $HOST --relayout \
     --flake /tmp/kiwami --force > /tmp/relayout.log 2>&1; true" >/dev/null 2>&1
 
@@ -61,8 +66,10 @@ log=$("$DIR/vmssh" 'cat /tmp/relayout.log' 2>/dev/null)
 
 echo "$log" | grep -q "is being replaced" \
   && ok "it says the layout is being replaced" || no "it says the layout is being replaced"
-echo "$log" | grep -qE '^\s+\+.*luks' \
-  && ok "the diff shows encryption being added" || no "the diff shows encryption being added"
+# Colour codes sit between the indentation and the text, so a pattern
+# anchored on "+" never matched. Strip them and read the summary instead.
+echo "$log" | sed 's/\x1b\[[0-9;]*m//g' | grep -qE 'encrypted: no -> yes' \
+  && ok "it reports encryption being turned on" || no "it reports encryption being turned on"
 
 step "and aborting leaves no trace"
 after=$("$DIR/vmssh" "grep -c 'type = \"luks\"' /tmp/kiwami/hosts/$HOST/disk.nix" 2>/dev/null | tr -d '[:space:]')
@@ -72,9 +79,12 @@ after=$("$DIR/vmssh" "grep -c 'type = \"luks\"' /tmp/kiwami/hosts/$HOST/disk.nix
 
 # The disk itself must be untouched: the abort happens before formatting, and
 # an installer that writes before you confirm is worse than any prompt bug.
-"$DIR/vmssh" 'blkid /dev/vda >/dev/null 2>&1 && echo FORMATTED || echo BLANK' 2>/dev/null \
-  | grep -q BLANK \
-  && ok "the disk was never touched" || no "the disk was never touched"
+# lsblk under sudo, not blkid as the installer user: unprivileged blkid reads
+# a cache and exits 0, so a blank disk reported as formatted and this check
+# failed on a disk that was in fact untouched.
+state=$("$DIR/vmssh" 'sudo lsblk -no FSTYPE,PTTYPE /dev/vda | tr -d " \n"' 2>/dev/null)
+[ -z "$state" ] \
+  && ok "the disk was never touched" || no "the disk was never touched (found: $state)"
 
 echo
 if [ $fail -eq 0 ]; then

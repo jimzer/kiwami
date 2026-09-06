@@ -405,7 +405,7 @@ pub fn run_install(opts: Options) -> Result<(), String> {
                 println!("\n==> the layout is unchanged");
             } else {
                 println!("\n==> {} is being replaced", path.display());
-                show_layout_diff(before, &rendered);
+                describe_layout_change(before, &layout);
                 if !opts.assume_yes {
                     let answer = prompt("\nReplace it? [y/N] ").map_err(|e| e.to_string())?;
                     if !answer.eq_ignore_ascii_case("y") {
@@ -1896,29 +1896,38 @@ fn gh_authenticated() -> bool {
         .unwrap_or(false)
 }
 
-/// The lines that differ, without shelling out to diff.
+/// What changed about the layout, in the terms the questions were asked in.
 ///
-/// Whole-file output would bury the change: these files are ninety lines of
-/// comment around a dozen of substance, and the thing worth seeing is that
-/// the root content became a luks container, not that the header is the same
-/// as it was.
-fn show_layout_diff(before: &str, after: &str) {
-    let old: Vec<&str> = before.lines().filter(|l| !l.trim_start().starts_with('#')).collect();
-    let new: Vec<&str> = after.lines().filter(|l| !l.trim_start().starts_with('#')).collect();
-    let gone: Vec<&&str> = old.iter().filter(|l| !new.contains(l) && !l.trim().is_empty()).collect();
-    let added: Vec<&&str> = new.iter().filter(|l| !old.contains(l) && !l.trim().is_empty()).collect();
+/// A line-by-line diff was the obvious thing and was useless: the previous
+/// file may be hand-written while the new one is generated, so indentation
+/// differs on nearly every line and "disko.devices = {" shows up as an
+/// addition. The real change - encryption appearing - drowns in it, and a
+/// diff nobody can read is a confirmation nobody really gives.
+///
+/// The old layout is read back from the file by looking for the few things
+/// that distinguish one layout from another, which is crude and survives
+/// reformatting.
+fn describe_layout_change(before: &str, layout: &Layout) {
+    let was_encrypted = before.contains("type = \"luks\"");
+    let had_home = before.contains("home = {") || before.contains("\"home\"");
 
-    for l in gone.iter().take(12) {
-        println!("    \x1b[31m- {}\x1b[0m", l.trim());
-    }
-    if gone.len() > 12 {
-        println!("    \x1b[31m- ... {} more\x1b[0m", gone.len() - 12);
-    }
-    for l in added.iter().take(12) {
-        println!("    \x1b[32m+ {}\x1b[0m", l.trim());
-    }
-    if added.len() > 12 {
-        println!("    \x1b[32m+ ... {} more\x1b[0m", added.len() - 12);
+    let line = |label: &str, was: bool, now: bool| {
+        if was == now {
+            println!("    {label}: {}", if now { "yes" } else { "no" });
+        } else {
+            println!(
+                "    \x1b[33m{label}: {} -> {}\x1b[0m",
+                if was { "yes" } else { "no" },
+                if now { "yes" } else { "no" }
+            );
+        }
+    };
+
+    line("encrypted", was_encrypted, layout.encrypt);
+    line("separate /home disk", had_home, layout.home.is_some());
+    println!("    system disk: {}", layout.system.display());
+    if let Some(h) = &layout.home {
+        println!("    home disk:   {}", h.display());
     }
 }
 
