@@ -208,6 +208,8 @@ pub struct Options {
     pub new_host: bool,
     /// Rewrite hardware.nix even if one is already committed.
     pub regen_hardware: bool,
+    /// Ask the layout questions again for a host that already declares them.
+    pub relayout: bool,
     /// Offer the steps that come before an install - networking, and being
     /// reachable for help - rather than assuming they were done already.
     pub guided: bool,
@@ -270,6 +272,12 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     // because nothing had been cloned, made the menu offer something it then
     // would not do.
     let can_write = checkout.is_some() || clone_url(&flake).is_some();
+    if opts.relayout && !can_write {
+        return Err(format!(
+            "--relayout rewrites hosts/<name>/disk.nix, and {flake} can neither be\n\
+             written to nor cloned."
+        ));
+    }
     let host = resolve_host(
         &flake,
         opts.host.clone(),
@@ -280,7 +288,7 @@ pub fn run_install(opts: Options) -> Result<(), String> {
 
     // Now that a new machine has actually been chosen, give it somewhere to
     // be written down.
-    if host.create && checkout.is_none() {
+    if (host.create || opts.relayout) && checkout.is_none() {
         let dir = clone_flake(&flake, opts.assume_yes)?;
         flake = dir.to_string_lossy().to_string();
         checkout = Some(dir);
@@ -298,8 +306,16 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     // offer as a /home target.
     let disks_snapshot = disks.clone();
 
-    // An existing host already declares its disks, so that is the target.
-    let declared = if host.create { Vec::new() } else { host_disks(&flake, &host.name)? };
+    // An existing host already declares its disks, so that is the target -
+    // unless --relayout, which is how a machine changes its layout at all.
+    // Editing disk.nix on a running system does nothing: it is a recipe for
+    // formatting, and the disk is already formatted. So the layout changes
+    // where formatting happens, which is here.
+    let declared = if host.create || opts.relayout {
+        Vec::new()
+    } else {
+        host_disks(&flake, &host.name)?
+    };
 
     let mut targets: Vec<Disk> = if declared.is_empty() {
         // No declaration yet - a new host, whose disk.nix is written from
@@ -377,7 +393,28 @@ pub fn run_install(opts: Options) -> Result<(), String> {
         let ours = !host_dir.exists();
         fs::create_dir_all(&host_dir).map_err(|e| e.to_string())?;
         let path = host_dir.join("disk.nix");
-        fs::write(&path, render_disk_nix(&layout)?).map_err(|e| e.to_string())?;
+
+        // Replacing a layout is not the same act as writing a first one. The
+        // old file is committed, describes the disk currently in the machine,
+        // and is about to stop being true - so what changes is shown before
+        // anything is written, not just before anything is erased.
+        let previous = fs::read_to_string(&path).ok();
+        let rendered = render_disk_nix(&layout)?;
+        if let Some(before) = &previous {
+            if *before == rendered {
+                println!("\n==> the layout is unchanged");
+            } else {
+                println!("\n==> {} is being replaced", path.display());
+                show_layout_diff(before, &rendered);
+                if !opts.assume_yes {
+                    let answer = prompt("\nReplace it? [y/N] ").map_err(|e| e.to_string())?;
+                    if !answer.eq_ignore_ascii_case("y") {
+                        return Err("layout left as it was; nothing erased".into());
+                    }
+                }
+            }
+        }
+        fs::write(&path, &rendered).map_err(|e| e.to_string())?;
 
         // The rest of the host has to exist now too. disko's script is built
         // from this host, so a directory holding only disk.nix cannot be
@@ -503,6 +540,15 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     //
     // `kiwami update` rebuilds from the flake on GitHub instead, and a
     // workspace to hack in is an ordinary clone in ~/Projects.
+
+    if opts.relayout {
+        // The machine now has a layout the flake does not. Left unpushed, the
+        // next `kiwami update` builds a system whose fileSystems describe the
+        // disk this one replaced - which is the failure that made a checkout
+        // on the machine dangerous in the first place.
+        println!("\n==> this host's layout changed and is not on the flake yet");
+        println!("    after rebooting:  sudo kiwami host push");
+    }
 
     println!("\n==> done. Reboot into the installed system.");
     Ok(())
@@ -1777,6 +1823,32 @@ fn target_state_path(rel: &str) -> PathBuf {
         persist.join(rel)
     } else {
         PathBuf::from("/mnt").join(rel)
+    }
+}
+
+/// The lines that differ, without shelling out to diff.
+///
+/// Whole-file output would bury the change: these files are ninety lines of
+/// comment around a dozen of substance, and the thing worth seeing is that
+/// the root content became a luks container, not that the header is the same
+/// as it was.
+fn show_layout_diff(before: &str, after: &str) {
+    let old: Vec<&str> = before.lines().filter(|l| !l.trim_start().starts_with('#')).collect();
+    let new: Vec<&str> = after.lines().filter(|l| !l.trim_start().starts_with('#')).collect();
+    let gone: Vec<&&str> = old.iter().filter(|l| !new.contains(l) && !l.trim().is_empty()).collect();
+    let added: Vec<&&str> = new.iter().filter(|l| !old.contains(l) && !l.trim().is_empty()).collect();
+
+    for l in gone.iter().take(12) {
+        println!("    \x1b[31m- {}\x1b[0m", l.trim());
+    }
+    if gone.len() > 12 {
+        println!("    \x1b[31m- ... {} more\x1b[0m", gone.len() - 12);
+    }
+    for l in added.iter().take(12) {
+        println!("    \x1b[32m+ {}\x1b[0m", l.trim());
+    }
+    if added.len() > 12 {
+        println!("    \x1b[32m+ ... {} more\x1b[0m", added.len() - 12);
     }
 }
 

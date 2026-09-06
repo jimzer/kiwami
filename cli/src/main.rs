@@ -51,6 +51,14 @@ enum Cmd {
         /// Re-detect hardware even if hardware.nix is already committed
         #[arg(long)]
         regen_hardware: bool,
+        /// Ask the layout questions again and rewrite this host's disk.nix.
+        ///
+        /// The way a machine changes its disk layout - adding encryption, or
+        /// moving /home - since editing the file on a running system does
+        /// nothing: it is a recipe for formatting, and the disk is already
+        /// formatted.
+        #[arg(long)]
+        relayout: bool,
         /// Walk through networking and remote access first. What the
         /// installer image starts on boot.
         #[arg(long)]
@@ -206,7 +214,7 @@ fn main() -> std::process::ExitCode {
                 }
             },
         },
-        Cmd::Install { disk, host, flake, yes, force, new, regen_hardware, guided } => {
+        Cmd::Install { disk, host, flake, yes, force, new, regen_hardware, relayout, guided } => {
             let opts = install::Options {
                 disk,
                 host,
@@ -215,6 +223,7 @@ fn main() -> std::process::ExitCode {
                 force,
                 new_host: new,
                 regen_hardware,
+                relayout,
                 guided,
             };
             if let Err(e) = install::run_install(opts) {
