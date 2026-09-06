@@ -213,6 +213,30 @@ fn read_trim(p: &str) -> Option<String> {
 }
 
 /// origin/main, or origin/master on a repository that predates the rename.
+/// Whether hosts/<name> in this checkout differs from what origin already
+/// carries - the question the installer needs answered before it claims the
+/// host is unpushed.
+///
+/// Three ways to differ, and the first is the one that is easy to miss: a
+/// brand new host is untracked, so `git diff` reports nothing about it and a
+/// naive check calls it identical.
+pub fn differs_from_origin(repo: &Path, name: &str) -> Result<bool, String> {
+    let rel = format!("hosts/{name}");
+    git(repo, &["fetch", "--quiet", "origin"])?;
+    let base = base_ref(repo)?;
+
+    if git(repo, &["ls-files", "--", &rel])?.trim().is_empty() {
+        return Ok(true); // untracked: origin has never seen it
+    }
+    if !git(repo, &["ls-files", "--others", "--exclude-standard", "--", &rel])?
+        .trim()
+        .is_empty()
+    {
+        return Ok(true); // a new file inside a tracked host
+    }
+    Ok(git(repo, &["diff", "--quiet", &base, "--", &rel]).is_err())
+}
+
 fn base_ref(repo: &Path) -> Result<String, String> {
     for candidate in ["origin/main", "origin/master"] {
         if git(repo, &["rev-parse", "--verify", "--quiet", candidate]).is_ok() {

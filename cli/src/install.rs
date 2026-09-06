@@ -1960,6 +1960,25 @@ fn prebuilt_system(host: &str) -> Option<String> {
 fn offer_host_push(checkout: &Option<PathBuf>, host: &str, assume_yes: bool) -> Result<(), String> {
     let Some(repo) = checkout else { return Ok(()) };
 
+    // Asked before it is announced.
+    //
+    // This used to state "hosts/<host> exists only on this machine" as a fact,
+    // without checking. When the host had already been pushed - from a laptop,
+    // before the install - the push that followed correctly reported nothing
+    // to do, and the pair read as a failure: a confident claim, then a refusal
+    // to act on it. Half an hour went into looking for a bug in the push. The
+    // push was right; the sentence above it was not.
+    match crate::host::differs_from_origin(repo, host) {
+        Ok(false) => {
+            println!("\n==> hosts/{host} already matches the flake - nothing to push");
+            return Ok(());
+        }
+        // Unreachable network, no origin: fall through and let the push say
+        // so properly rather than deciding here on a guess.
+        Err(_) => {}
+        Ok(true) => {}
+    }
+
     println!("\n==> hosts/{host} exists only on this machine");
     if assume_yes {
         println!("    push it with: sudo kiwami host push");
