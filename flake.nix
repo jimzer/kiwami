@@ -188,6 +188,10 @@
                 # to have chosen to ship it - which, on real hardware, it had
                 # not.
                 pkgs.efibootmgr
+                # The installer offers to push the host it just wrote, which
+                # means logging in to GitHub from here. Without gh on the image
+                # that offer would fail at the moment it was accepted.
+                pkgs.gh
                 # How the credentials get here without anything long being
                 # typed: one note holds the whole environment file. Unlocking a
                 # vault exposes all of it to whatever runs on the machine,

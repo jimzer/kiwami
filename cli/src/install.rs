@@ -541,13 +541,12 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     // `kiwami update` rebuilds from the flake on GitHub instead, and a
     // workspace to hack in is an ordinary clone in ~/Projects.
 
-    if opts.relayout {
-        // The machine now has a layout the flake does not. Left unpushed, the
-        // next `kiwami update` builds a system whose fileSystems describe the
-        // disk this one replaced - which is the failure that made a checkout
-        // on the machine dangerous in the first place.
-        println!("\n==> this host's layout changed and is not on the flake yet");
-        println!("    after rebooting:  sudo kiwami host push");
+    // A host that was written or changed here exists only on this machine
+    // until it is pushed. Offered now rather than left as a note: the machine
+    // is about to reboot, the network is up, and "do it later" is how
+    // hosts/xps spent its first week one dead disk from unrecoverable.
+    if opts.relayout || host.create {
+        offer_host_push(&checkout, &host.name, opts.assume_yes)?;
     }
 
     println!("\n==> done. Reboot into the installed system.");
@@ -1824,6 +1823,69 @@ fn target_state_path(rel: &str) -> PathBuf {
     } else {
         PathBuf::from("/mnt").join(rel)
     }
+}
+
+/// Offer to put this host's configuration on the flake, before rebooting.
+///
+/// The machine now has a layout, and hardware, that GitHub does not. Until
+/// that is pushed the machine cannot rebuild itself - `kiwami update` would
+/// build a system describing the disk this one replaced - and nothing but the
+/// disk in front of you knows how it was made.
+///
+/// It asks rather than doing it: pushing to someone's repository is an
+/// outward-facing act, and an installer has no business taking it silently.
+fn offer_host_push(checkout: &Option<PathBuf>, host: &str, assume_yes: bool) -> Result<(), String> {
+    let Some(repo) = checkout else { return Ok(()) };
+
+    println!("\n==> hosts/{host} exists only on this machine");
+    if assume_yes {
+        println!("    push it with: sudo kiwami host push");
+        return Ok(());
+    }
+    let answer = prompt("\nPush it to the flake now? [Y/n] ").map_err(|e| e.to_string())?;
+    if answer.eq_ignore_ascii_case("n") {
+        println!("    later, then:  sudo kiwami host push");
+        return Ok(());
+    }
+
+    // gh first, because the push needs it and finding that out afterwards
+    // means doing the whole thing twice. The browser approval happens on
+    // whatever device you have - nothing long gets typed here either.
+    if !gh_authenticated() {
+        println!("\n==> github login");
+        let status = Command::new("gh").args(["auth", "login"]).status();
+        if !matches!(status, Ok(s) if s.success()) && !gh_authenticated() {
+            println!("    not logged in - push it after rebooting:");
+            println!("      sudo kiwami host push");
+            return Ok(());
+        }
+    }
+
+    // host push reads KIWAMI_REPO, which here is the clone made for this
+    // install rather than a checkout on the installed system - that machine
+    // deliberately keeps none.
+    std::env::set_var("KIWAMI_REPO", repo);
+    match crate::host::push(Some(host.to_string()), false) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            // Not fatal. The system is installed and works; the config is
+            // simply not upstream yet, and saying so beats failing an install
+            // that succeeded.
+            println!("    could not push: {e}");
+            println!("    after rebooting:  sudo kiwami host push");
+            Ok(())
+        }
+    }
+}
+
+fn gh_authenticated() -> bool {
+    Command::new("gh")
+        .args(["auth", "status"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
 
 /// The lines that differ, without shelling out to diff.
