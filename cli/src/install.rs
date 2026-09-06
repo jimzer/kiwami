@@ -2183,6 +2183,25 @@ fn fix_boot_order() -> Result<(), String> {
         return Ok(());
     };
 
+    // Entries left behind by previous installs onto this same machine.
+    //
+    // Every install writes a new "Linux Boot Manager" entry, and reformatting
+    // the ESP gives it a new partition GUID, so the old entry is never
+    // overwritten - it just stays in NVRAM naming a partition that no longer
+    // exists. Four installs, four entries, three of them dead. The firmware
+    // walks past dead entries, so this stays invisible until the day a live
+    // entry sorts below one of them and the machine boots to nothing.
+    //
+    // Sorting the right entry first, which is all this used to do, does not
+    // help: it leaves the pile to keep growing.
+    prune_dead_entries(&text, &entry)?;
+
+    // Re-read: the ids are the same, but BootOrder just lost its dead members.
+    let text = Command::new("efibootmgr")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or(text.into_owned());
+
     let order: Vec<String> = text
         .lines()
         .find(|l| l.starts_with("BootOrder:"))
@@ -2201,6 +2220,81 @@ fn fix_boot_order() -> Result<(), String> {
     run("efibootmgr", &["-o", &joined, "-t", "1"])?;
     println!("    boot order -> {joined} (Boot{entry} is this machine's ESP)");
     Ok(())
+}
+
+/// Delete boot entries whose partition is gone.
+///
+/// Deliberately narrow, because deleting the wrong entry is how a machine
+/// stops booting. An entry is removed only when all of these hold:
+///
+///   - its device path names a GPT partition, so there is a GUID to check.
+///     USB sticks appear as MBR or CDROM paths and are never touched;
+///   - that GUID is on no block device attached right now;
+///   - it is neither the entry we are about to make first, nor the one this
+///     installer booted from.
+///
+/// If the device list cannot be read, nothing is removed. A machine with an
+/// unplugged GPT boot disk would see its entry as dead - true of an external
+/// system disk, which is why this only ever runs during an install, when the
+/// disks that matter are by definition present.
+fn prune_dead_entries(text: &str, keep: &str) -> Result<(), String> {
+    let live = live_partuuids();
+    if live.is_empty() {
+        return Ok(());
+    }
+    let current = text
+        .lines()
+        .find(|l| l.starts_with("BootCurrent:"))
+        .and_then(|l| l.split(':').nth(1))
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+
+    for line in text.lines() {
+        let Some(id) = boot_entry_id(line) else { continue };
+        if id == keep || id == current {
+            continue;
+        }
+        let Some(guid) = gpt_guid(line) else { continue };
+        if live.contains(&guid) {
+            continue;
+        }
+        let label = line.split('\t').nth(1).unwrap_or("").trim();
+        println!("    removing Boot{id} ({label}) - its partition no longer exists");
+        run("efibootmgr", &["-b", &id, "-B"])?;
+    }
+    Ok(())
+}
+
+/// The four hex digits of a `Boot0001* ...` line. None for BootOrder,
+/// BootCurrent, BootNext and Timeout, whose next characters are not hex.
+fn boot_entry_id(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("Boot")?;
+    let id: String = rest.chars().take(4).collect();
+    (id.len() == 4 && id.chars().all(|c| c.is_ascii_hexdigit())).then_some(id)
+}
+
+/// The partition GUID out of a device path like `HD(1,GPT,<guid>,0x800,...)`.
+fn gpt_guid(line: &str) -> Option<String> {
+    let rest = &line[line.find("GPT,")? + 4..];
+    let guid = &rest[..rest.find(',')?];
+    (guid.len() == 36).then(|| guid.to_lowercase())
+}
+
+/// PARTUUIDs of every partition attached to this machine.
+fn live_partuuids() -> std::collections::HashSet<String> {
+    Command::new("lsblk")
+        .args(["-rno", "PARTUUID"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| {
+            String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .map(|l| l.trim().to_lowercase())
+                .filter(|l| !l.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Carry the installer's network state onto the installed system.
@@ -2306,5 +2400,54 @@ mod tests {
         ];
         names.sort_by_key(|n| (opaque(n), n.len(), n.clone()));
         assert_eq!(names[0], "nvme-QEMU_NVMe_Ctrl_kiwami-test-nvme");
+    }
+}
+
+#[cfg(test)]
+mod boot_entry_tests {
+    use super::*;
+
+    // Real output from the XPS, captured after four reinstalls onto the same
+    // disk. Note Boot0000 and Boot0001 share a GUID: the Windows entry and the
+    // first NixOS install both named the partition that install replaced.
+    const XPS: &str = "\
+BootCurrent: 0002
+BootOrder: 0006,0005,0004,0001,0000,0002,0003
+Boot0000  Windows Boot Manager\tHD(1,GPT,3bb0c7c6-67ab-4df2-bfe4-8bdb182c2e71,0x800,0x154000)/\\EFI\\Microsoft\\Boot\\bootmgfw.efi
+Boot0001* Linux Boot Manager\tHD(1,GPT,3bb0c7c6-67ab-4df2-bfe4-8bdb182c2e71,0x800,0x200000)/\\EFI\\systemd\\systemd-bootx64.efi
+Boot0002* UEFI: Samsung Portable SSD T5 0\tPciRoot(0x0)/Pci(0x14,0x0)/USB(12,0)/CDROM(1,0x114,0x6000)0000424f
+Boot0003* UEFI: Samsung Portable SSD T5 0, Partition 2\tPciRoot(0x0)/Pci(0x14,0x0)/USB(12,0)/HD(2,MBR,0x9fb6382f,0x114,0x1800)0000424f
+Boot0004* Linux Boot Manager\tHD(1,GPT,05c10375-5160-4656-9d91-9054661b4fb1,0x800,0x200000)/\\EFI\\systemd\\systemd-bootx64.efi
+Boot0005* Linux Boot Manager\tHD(1,GPT,9257f17d-855a-40e5-bf51-ce11b4903ab6,0x800,0x200000)/\\EFI\\systemd\\systemd-bootx64.efi
+Boot0006* Linux Boot Manager\tHD(1,GPT,5bd8c011-0071-4e4a-81e7-cb0a2186e763,0x800,0x200000)/\\EFI\\systemd\\systemd-bootx64.efi";
+
+    #[test]
+    fn ids_come_only_from_entries() {
+        let ids: Vec<_> = XPS.lines().filter_map(boot_entry_id).collect();
+        // BootCurrent and BootOrder must not be mistaken for entries.
+        assert_eq!(ids, ["0000", "0001", "0002", "0003", "0004", "0005", "0006"]);
+    }
+
+    #[test]
+    fn only_gpt_paths_yield_a_guid() {
+        let guids: Vec<_> = XPS.lines().filter_map(gpt_guid).collect();
+        assert_eq!(guids.len(), 5, "the two USB entries have no GPT partition");
+        assert!(guids.contains(&"5bd8c011-0071-4e4a-81e7-cb0a2186e763".to_string()));
+    }
+
+    /// The bug this exists to prevent: a stick's entry deleted because its
+    /// device path has no GUID to match, or a live entry deleted by accident.
+    #[test]
+    fn removable_and_live_entries_are_never_candidates() {
+        let live = ["5bd8c011-0071-4e4a-81e7-cb0a2186e763".to_string()];
+        let doomed: Vec<_> = XPS
+            .lines()
+            .filter_map(|l| Some((boot_entry_id(l)?, l)))
+            .filter(|(id, _)| id != "0006" && id != "0002")
+            .filter_map(|(id, l)| Some((id, gpt_guid(l)?)))
+            .filter(|(_, g)| !live.contains(g))
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(doomed, ["0000", "0001", "0004", "0005"], "only the dead GPT entries");
     }
 }
