@@ -157,7 +157,20 @@
                  that flakes only see git-tracked files.
                '';
 
-          mkInstaller = { system, testKey ? false }:
+          # An installer image carrying a host's entire built system.
+          #
+          # `nixos-install --system <path>` installs a prebuilt closure rather
+          # than evaluating a flake, so a machine can be rebuilt with no
+          # network at all: the 5.7 GiB it would otherwise download is already
+          # on the stick. What it does not carry is any state - no keys, no
+          # tokens, no wifi - so the image is not a bundle of secrets. It is
+          # still your configuration, which names your bucket and your
+          # hostname, so it is private rather than publishable.
+          #
+          # Deliberately not fresh-by-design: the image supplies the machine,
+          # `kiwami snapshot restore` supplies what has happened since. A
+          # months-old image still boots you into a working laptop.
+          mkInstaller = { system, testKey ? false, prebuilt ? null }:
         nixpkgs.lib.nixosSystem {
           specialArgs = { inherit inputs; };
           modules = [
@@ -225,6 +238,23 @@
               # The installer shells out to `nix build` for the disko script,
               # and the stock ISO does not enable flakes.
               nix.settings.experimental-features = [ "nix-command" "flakes" ];
+
+              # The host's closure, and a signpost saying it is there. Two
+              # files rather than one so the installer can refuse to use a
+              # closure built for a different machine.
+              isoImage.storeContents =
+                lib.optional (prebuilt != null) prebuilt.config.system.build.toplevel;
+              isoImage.contents = lib.optionals (prebuilt != null) [
+                {
+                  source = pkgs.writeText "kiwami-host" prebuilt.config.networking.hostName;
+                  target = "/kiwami/host";
+                }
+                {
+                  source = pkgs.writeText "kiwami-system"
+                    "${prebuilt.config.system.build.toplevel}";
+                  target = "/kiwami/system";
+                }
+              ];
 
               # zstd, not the default xz: the image is recompressed in full for
               # every change, however small, and that cost dominates the build.
@@ -311,6 +341,14 @@
         // {
           installer-x86_64 = mkInstaller { system = "x86_64-linux"; };
           installer-aarch64 = mkInstaller { system = "aarch64-linux"; };
+
+          # A ready-to-install image for this machine: boot it and the whole
+          # system is already on the stick. Built on demand - compressing 5.7
+          # GiB is minutes, not something to do on every push.
+          installer-xps = mkInstaller {
+            system = "x86_64-linux";
+            prebuilt = self.nixosConfigurations.xps;
+          };
 
           # Same image plus the harness key, so the installer matrix can be
           # run against the media people actually boot.

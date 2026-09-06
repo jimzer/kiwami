@@ -243,7 +243,21 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     }
 
     println!("==> checking network");
-    net::ensure(!opts.assume_yes)?;
+    // A medium carrying a system does not need one to install. It is still
+    // wanted - the restore reads from R2, and a machine that cannot reach
+    // anything is only half back - but "no wifi here" should not stop you
+    // getting a bootable laptop out of a stick that already holds the whole
+    // system.
+    let carries_system = Path::new("/iso/kiwami/system").exists();
+    match net::ensure(!opts.assume_yes) {
+        Ok(()) => {}
+        Err(e) if carries_system => {
+            println!("    no network: {e}");
+            println!("    continuing anyway - this medium carries the system.");
+            println!("    the restore needs a network, so it will be offered later.");
+        }
+        Err(e) => return Err(e),
+    }
 
     // Offered here rather than left as something to remember: an install is
     // exactly when a second pair of eyes is useful, and afterwards the machine
@@ -532,9 +546,21 @@ pub fn run_install(opts: Options) -> Result<(), String> {
         ));
     }
 
-    println!("==> installing {} (this takes a while)", flake);
-    let flake_ref = format!("{}#{}", flake, host.name);
-    run("nixos-install", &["--flake", &flake_ref, "--no-root-passwd"])?;
+    // A closure on the medium is installed directly. Evaluating the flake
+    // and downloading ~6 GiB is the slow part of an install and the only part
+    // that needs a network; when the stick already carries the system, both
+    // disappear.
+    match prebuilt_system(&host.name) {
+        Some(path) => {
+            println!("==> installing the system from this medium (no download)");
+            run("nixos-install", &["--system", &path, "--no-root-passwd"])?;
+        }
+        None => {
+            println!("==> installing {} (this takes a while)", flake);
+            let flake_ref = format!("{}#{}", flake, host.name);
+            run("nixos-install", &["--flake", &flake_ref, "--no-root-passwd"])?;
+        }
+    }
 
     println!("==> seeding the password");
     seed_password(&flake, &host.name)?;
@@ -1841,6 +1867,31 @@ fn target_state_path(rel: &str) -> PathBuf {
         persist.join(rel)
     } else {
         PathBuf::from("/mnt").join(rel)
+    }
+}
+
+/// The system this medium carries, if it carries one for this host.
+///
+/// Two files: the host it was built for, and where its closure is. The host
+/// is checked rather than assumed - a stick built for one machine must not
+/// quietly install that machine onto another.
+fn prebuilt_system(host: &str) -> Option<String> {
+    let want = fs::read_to_string("/iso/kiwami/host").ok()?;
+    if want.trim() != host {
+        println!(
+            "    (this medium carries {}, not {host} - installing from the flake)",
+            want.trim()
+        );
+        return None;
+    }
+    let path = fs::read_to_string("/iso/kiwami/system").ok()?.trim().to_string();
+    // Present in the store, not merely named: the signpost is a text file and
+    // could outlive the thing it points at.
+    if Path::new(&path).exists() {
+        Some(path)
+    } else {
+        println!("    (this medium names a system it does not carry - installing from the flake)");
+        None
     }
 }
 

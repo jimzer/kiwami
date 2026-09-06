@@ -113,6 +113,25 @@ just check           # lint + evaluate every host and the boot test (~16s)
 The VM is aarch64 so it runs natively under HVF on Apple silicon. CI builds
 and boots x86_64, which is the architecture real hardware will use.
 
+### A stick that already holds the machine
+
+`nixosConfigurations.installer-xps` is the ordinary installer image plus this
+host's entire built system. `nixos-install --system` then installs a prebuilt
+closure instead of evaluating the flake, so the ~6 GiB it would otherwise
+download is already on the stick and the install needs no network at all.
+
+```bash
+# on an x86_64 Linux machine (the laptop can build its own)
+nix build .#nixosConfigurations.installer-xps.config.system.build.isoImage
+scripts/flash-linux.sh result/iso/*.iso
+```
+
+It carries no state - no keys, tokens or wifi - so it is not a bundle of
+secrets, though it does name your bucket and hostname and is private rather
+than publishable. And it does not need to be fresh: the image supplies the
+machine, `kiwami snapshot restore` supplies everything that happened since, so
+a months-old stick still boots you into a working laptop.
+
 ### Tests that need a Linux machine
 
 `tests/` holds the desktop nixosTest, which CI runs on x86_64. Everything
