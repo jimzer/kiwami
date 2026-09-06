@@ -436,6 +436,14 @@ pub fn run_install(opts: Options) -> Result<(), String> {
         if let Err(e) = review_layout(&path, opts.assume_yes) {
             if ours {
                 let _ = fs::remove_dir_all(&host_dir);
+            } else if let Some(before) = &previous {
+                // Put the old layout back. Abandoning the review erases
+                // nothing, so the file describing the disk must go back to
+                // describing the disk - otherwise declining the change leaves
+                // it silently applied on paper, and the next install without
+                // --relayout formats to the layout you just refused.
+                let _ = fs::write(&path, before);
+                println!("    {} restored", path.display());
             }
             return Err(e);
         }
