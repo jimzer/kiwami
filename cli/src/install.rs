@@ -423,7 +423,18 @@ pub fn run_install(opts: Options) -> Result<(), String> {
         if !host_dir.join("default.nix").exists() {
             scaffold_host(&host_dir, &host.name)?;
         }
-        placeholder_hardware(&host_dir)?;
+        // Only when there is nothing to lose. --relayout runs this same branch
+        // for a host that already exists, and writing the placeholder there
+        // destroyed a real, committed hardware.nix - after which the "detect
+        // hardware" step below saw a file present and skipped, so the machine
+        // installed with nothing but nixpkgs.hostPlatform.
+        //
+        // The result was a laptop with no redistributable firmware: no wifi
+        // (ath10k found no firmware) and no i915 DMC. It booted perfectly and
+        // looked fine until the first attempt to use the network.
+        if !host_dir.join("hardware.nix").exists() {
+            placeholder_hardware(&host_dir)?;
+        }
         chown_to_repo(repo, &host_dir)?;
 
         // Staged only once the layout is accepted - the flake must not be

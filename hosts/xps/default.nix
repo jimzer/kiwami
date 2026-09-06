@@ -29,6 +29,12 @@
   # survives. disk.nix beside this makes the subvolumes that depend on.
   kiwami.ephemeralRoot = true;
 
+  # The filesystem lives inside the LUKS container, so the rollback has to
+  # mount what comes out of it rather than the partition, which holds
+  # ciphertext. Without this the initrd would try to mount a LUKS blob as
+  # btrfs and the root would silently stop being wiped - or fail to boot.
+  kiwami.rootDevice = "/dev/mapper/cryptroot";
+
   # Log the desktop user in with no password. Off deliberately: it suits a
   # throwaway VM and not a laptop, where it means whoever opens the lid is
   # you. Uncomment only if you know that is what you want.

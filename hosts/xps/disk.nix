@@ -1,4 +1,12 @@
-# Disk layout for this machine, written by `kiwami install`.
+# Disk layout for this machine.
+#
+# Encrypted: the whole filesystem lives inside a LUKS container, so the disk
+# holds nothing readable when the machine is off. The passphrase is asked for
+# in the initrd, before anything else exists.
+#
+# Reconstructed by hand after `--relayout` wrote it on the machine and the
+# push that would have carried it here failed. The machine is the source of
+# truth for what it actually has; this file was matched against it.
 #
 # One declaration, two uses: disko formats from it, and fileSystems is derived
 # from the same tree - so what gets erased and what gets mounted cannot drift
@@ -41,6 +49,11 @@
             root = {
               size = "100%";
               content = {
+                type = "luks";
+                name = "cryptroot";
+                settings.allowDiscards = true;
+
+                content = {
                 type = "btrfs";
                 extraArgs = [
                   "-f"
@@ -89,6 +102,7 @@ MNTPOINT=$(mktemp -d)
                  trap 'umount "$MNTPOINT"; rm -rf "$MNTPOINT"' EXIT
                  btrfs subvolume snapshot -r "$MNTPOINT/@root" "$MNTPOINT/@root-blank"
           '';
+                };
               };
             };
           };
