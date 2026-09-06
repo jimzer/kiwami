@@ -156,10 +156,22 @@ pub fn status() -> Result<(), String> {
 /// connection that now exists.
 pub fn restore(target: String, identity_only: bool, yes: bool) -> Result<(), String> {
     require_root()?;
+
+    // A machine that has just been installed has no credentials yet, and the
+    // restore is exactly what it needs. Rather than refuse and send someone
+    // off to assemble bw and restic commands by hand - which is what happened
+    // the first time this was skipped - fetch them the same way the installer
+    // does.
     if !Path::new(CRED_DEFAULT).exists() {
-        return Err(format!(
-            "no credentials at {CRED_DEFAULT} - run: sudo kiwami snapshot setup"
-        ));
+        println!("no credentials on this machine yet.");
+        let fetched = crate::install::fetch_from_bitwarden(Path::new(CRED_DEFAULT))?;
+        if !fetched {
+            return Err(format!(
+                "no credentials at {CRED_DEFAULT}.\n\
+                 Either run `sudo kiwami snapshot setup`, or put the note's\n\
+                 contents there by hand and try again."
+            ));
+        }
     }
 
     if !yes {

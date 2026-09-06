@@ -595,6 +595,14 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     }
 
     println!("\n==> done. Reboot into the installed system.");
+    if !Path::new("/mnt/persist/var/lib/kiwami/backup/env").exists() {
+        // Said here because the restore is the difference between a machine
+        // that is yours and one that merely boots, and the moment to notice
+        // is before the installer is gone.
+        println!("\n    Nothing was restored, so this machine will come up without");
+        println!("    its keys, tokens or wifi. To restore now, before rebooting:");
+        println!("      sudo kiwami snapshot restore --target /mnt --identity");
+    }
     Ok(())
 }
 
@@ -1678,9 +1686,9 @@ fn offer_restore(guided: bool, assume_yes: bool) -> Result<(), String> {
     if !guided || assume_yes {
         return Ok(());
     }
-    let answer = prompt("\nRestore this machine from a backup? [y/N] ")
-        .map_err(|e| e.to_string())?;
-    if !answer.eq_ignore_ascii_case("y") {
+    if !insist("\nRestore this machine from a backup? [y/n] ")? {
+        println!("\n    skipping the restore. To do it later, from the installer or");
+        println!("    the booted machine:  sudo kiwami snapshot restore --identity");
         return Ok(());
     }
 
@@ -1718,6 +1726,31 @@ fn offer_restore(guided: bool, assume_yes: bool) -> Result<(), String> {
     Ok(())
 }
 
+/// A yes/no question that will not accept a shrug.
+///
+/// The ordinary prompts treat anything that is not "y" as no, which is fine
+/// for a question you can ask again. It is not fine here: an install runs for
+/// minutes with no output, so a stray Enter pressed while waiting sits in the
+/// terminal buffer and answers the next question the instant it appears. That
+/// silently skipped the restore - the step that makes a reinstall cheap - and
+/// went straight to "done", leaving a machine with no keys, no tokens and no
+/// wifi, and no sign anything had been asked.
+///
+/// Repeating the question costs a keystroke. Losing the answer costs an hour.
+fn insist(question: &str) -> Result<bool, String> {
+    for _ in 0..5 {
+        let answer = prompt(question).map_err(|e| e.to_string())?;
+        match answer.trim().to_ascii_lowercase().as_str() {
+            "y" | "yes" => return Ok(true),
+            "n" | "no" => return Ok(false),
+            "" => println!("    (nothing typed - answer y or n)"),
+            other => println!("    (did not understand {other:?} - answer y or n)"),
+        }
+    }
+    // Five unclear answers is a terminal talking to itself, not a person.
+    Ok(false)
+}
+
 /// Read the credentials out of a Bitwarden note.
 ///
 /// The point is that nothing long gets typed. An R2 secret is 64 random
@@ -1738,7 +1771,7 @@ fn offer_restore(guided: bool, assume_yes: bool) -> Result<(), String> {
 ///     RESTIC_PASSWORD=...
 ///     AWS_ACCESS_KEY_ID=...
 ///     AWS_SECRET_ACCESS_KEY=...
-fn fetch_from_bitwarden(dest: &Path) -> Result<bool, String> {
+pub(crate) fn fetch_from_bitwarden(dest: &Path) -> Result<bool, String> {
     if !have_cmd("bw") {
         return Ok(false);
     }
@@ -1754,7 +1787,10 @@ fn fetch_from_bitwarden(dest: &Path) -> Result<bool, String> {
     // wrong character would have dropped straight through to copying a file
     // by hand, which is the thing all of this exists to avoid.
     for attempt in 0..3 {
-        let item = prompt("Note name [kiwami-backup]: ").map_err(|e| e.to_string())?;
+        if let Some(dir) = dest.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    let item = prompt("Note name [kiwami-backup]: ").map_err(|e| e.to_string())?;
         let item = if item.trim().is_empty() { "kiwami-backup".to_string() } else { item };
         if try_bitwarden_note(&item, dest)? {
             return Ok(true);
