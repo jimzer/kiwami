@@ -97,6 +97,11 @@ luks-ephemeral-test: fetch-iso
 guided-test:
     @python3 ./scripts/guided-test.py
 
+# --relayout rewrites a host's disk.nix, and aborting the review puts it back.
+# Stops before formatting, so it costs a couple of minutes and erases nothing.
+relayout-test: fetch-iso
+    ./scripts/relayout-test.sh
+
 # Run the installer test matrix (needs start-test-disks)
 install-test:
     @./scripts/install-test.sh
