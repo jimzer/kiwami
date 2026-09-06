@@ -338,17 +338,23 @@
         };
         in
         nixpkgs.lib.genAttrs hostNames (name: mkHost [ (./hosts + "/${name}") ])
+        # An installer image per host, carrying that host's whole built
+        # system. Derived rather than listed: a machine added to hosts/ gets
+        # one without anybody remembering to write it down, which is the same
+        # reason the hosts themselves are read from the directory.
+        //
+        nixpkgs.lib.genAttrs (map (n: "installer-${n}") hostNames) (imageName:
+          let
+            host = nixpkgs.lib.removePrefix "installer-" imageName;
+            target = self.nixosConfigurations.${host};
+          in
+          mkInstaller {
+            system = target.config.nixpkgs.hostPlatform.system;
+            prebuilt = target;
+          })
         // {
           installer-x86_64 = mkInstaller { system = "x86_64-linux"; };
           installer-aarch64 = mkInstaller { system = "aarch64-linux"; };
-
-          # A ready-to-install image for this machine: boot it and the whole
-          # system is already on the stick. Built on demand - compressing 5.7
-          # GiB is minutes, not something to do on every push.
-          installer-xps = mkInstaller {
-            system = "x86_64-linux";
-            prebuilt = self.nixosConfigurations.xps;
-          };
 
           # Same image plus the harness key, so the installer matrix can be
           # run against the media people actually boot.

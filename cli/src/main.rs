@@ -100,6 +100,15 @@ enum Cmd {
         #[arg(long)]
         dry: bool,
     },
+    /// Build an installer image that already contains this machine
+    Image {
+        /// Which host's system to embed. Defaults to this machine.
+        #[arg(long)]
+        host: Option<String>,
+        /// Where to leave the result symlink
+        #[arg(long, default_value = "./kiwami-image")]
+        out: String,
+    },
     /// Back /persist up, and put it back
     Snapshot {
         #[command(subcommand)]
@@ -250,6 +259,12 @@ fn main() -> std::process::ExitCode {
         Cmd::Update { commit, dry } => {
             if let Err(e) = update::run(commit, dry) {
                 eprintln!("update: {e}");
+                return std::process::ExitCode::FAILURE;
+            }
+        }
+        Cmd::Image { host, out } => {
+            if let Err(e) = update::image(host, out) {
+                eprintln!("image: {e}");
                 return std::process::ExitCode::FAILURE;
             }
         }

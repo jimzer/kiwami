@@ -145,6 +145,65 @@ fn hostname() -> Result<String, String> {
         .and_then(|h| if h.is_empty() { Err("empty hostname".into()) } else { Ok(h) })
 }
 
+/// Build an installer image carrying this machine's whole system.
+///
+/// Boot it and the install needs no network: `nixos-install --system` copies a
+/// closure that is already on the stick, instead of evaluating a flake and
+/// downloading several gigabytes.
+///
+/// A command rather than a documented `nix build` line, for the same reason
+/// `kiwami update` exists: an incantation you have to look up is one you get
+/// wrong at the moment you are least able to afford it.
+pub fn image(host: Option<String>, out: String) -> Result<(), String> {
+    let host = match host {
+        Some(h) => h,
+        None => hostname()?,
+    };
+    let rev = resolve_head()?;
+    let attr = format!(
+        "{FLAKE}/{rev}#nixosConfigurations.installer-{host}.config.system.build.isoImage"
+    );
+
+    println!("==> building an installer for {host} from {rev}");
+    println!("    this compresses the whole system, so it is minutes, not seconds");
+
+    let status = Command::new("nix")
+        .args([
+            "--extra-experimental-features",
+            "nix-command flakes",
+            "build",
+            &attr,
+            "--print-build-logs",
+            "--out-link",
+            &out,
+        ])
+        .status()
+        .map_err(|e| format!("nix build: {e}"))?;
+    if !status.success() {
+        return Err(format!(
+            "could not build an image for {host}.\n\
+             Is its configuration pushed? The image is built from the flake, not from here."
+        ));
+    }
+
+    // The path, because the next thing anyone does is write it to a stick.
+    let iso = std::fs::read_dir(format!("{out}/iso"))
+        .ok()
+        .and_then(|mut d| d.next().and_then(|e| e.ok()))
+        .map(|e| e.path().display().to_string());
+
+    println!();
+    match iso {
+        Some(path) => {
+            let size = std::fs::metadata(&path).map(|m| m.len() / 1_000_000).unwrap_or(0);
+            println!("  {path}  ({size} MB)");
+            println!("\n  sudo scripts/flash-linux.sh {path}");
+        }
+        None => println!("  built: {out}"),
+    }
+    Ok(())
+}
+
 /// The commit this system was last built from, if it was built by us.
 pub fn current_commit() -> Option<String> {
     fs::read_to_string(STAMP).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
