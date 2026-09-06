@@ -42,7 +42,7 @@ in
     settings = {
       # The greeter. Asks who you are, then starts the session as them.
       default_session = {
-        command = "${pkgs.greetd.tuigreet}/bin/tuigreet --time --remember --cmd '${session}'";
+        command = "${pkgs.tuigreet}/bin/tuigreet --time --remember --cmd '${session}'";
         user = "greeter";
       };
     }
