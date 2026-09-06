@@ -50,14 +50,19 @@ before=$("$DIR/vmssh" "grep -c 'type = \"luks\"' /tmp/kiwami/hosts/$HOST/disk.ni
 [ "${before:-0}" = "0" ] && ok "the host starts out unencrypted" || no "the host starts out unencrypted"
 
 step "running the wizard for a host that already declares its disks"
-# Answers, in order: which disk, /home elsewhere, encrypt, then abort at the
-# review. Fed on stdin rather than typed at the console - the prompts read
-# stdin, and this keeps the test deterministic.
+# Answers, in order: which disk, encrypt, then abort at the review. Fed on
+# stdin rather than typed at the console - the prompts read stdin, and this
+# keeps the test deterministic.
+#
+# There is no "/home on a separate disk?" question here: the wizard only asks
+# it when the machine has another disk to offer, and this VM has one. An
+# answer for it shifted everything by one, so "n" landed on "Encrypt the
+# disk?" and the test then failed for the reason it had itself created.
 # sudo, because vmssh lands as the unprivileged installer user and the
 # installer refuses without root - it enumerates disks and is about to erase
 # one. `sudo env` rather than -E: sudo strips the environment, and nix needs
 # its experimental features flag to run a flake.
-"$DIR/vmssh" "cd /tmp && printf '1\\nn\\ny\\na\\n' | \
+"$DIR/vmssh" "cd /tmp && printf '1\\ny\\na\\n' | \
   sudo env NIX_CONFIG='experimental-features = nix-command flakes' \
   nix run /tmp/kiwami#kiwami -- install --host $HOST --relayout \
     --flake /tmp/kiwami --force > /tmp/relayout.log 2>&1; true" >/dev/null 2>&1
