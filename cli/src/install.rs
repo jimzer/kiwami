@@ -565,13 +565,30 @@ pub fn run_install(opts: Options) -> Result<(), String> {
     println!("==> seeding the password");
     seed_password(&flake, &host.name)?;
 
-    println!("==> carrying network state over");
-    carry_network_state()?;
-
     println!("==> setting the boot order");
     fix_boot_order()?;
 
-    offer_restore(opts.guided, opts.assume_yes)?;
+    // The restore runs first, and the installer's own network state is laid
+    // down after it. Both write the same files, so which goes last decides
+    // what the machine wakes up with - see carry_network_state.
+    //
+    // Its failure is deliberately not fatal. The system is installed by this
+    // point; a restore that could not reach R2 or could not unlock Bitwarden
+    // is a missing convenience, not a broken machine, and aborting here would
+    // skip carrying the network over - stranding a machine that is fine, with
+    // no wifi and no tailnet, precisely when you need to reach it to retry.
+    // So it is reported at the end, where it cannot be mistaken for success.
+    let outcome = offer_restore(opts.guided, opts.assume_yes);
+    let restored = matches!(outcome, Ok(true));
+
+    println!("==> carrying network state over");
+    carry_network_state(restored)?;
+
+    if let Err(e) = &outcome {
+        println!("\n    the restore did not finish: {e}");
+        println!("    the system is installed and will boot. Retry it after boot:");
+        println!("      sudo kiwami snapshot restore --identity");
+    }
 
     // Deliberately no checkout is placed on the installed machine.
     //
@@ -1682,14 +1699,14 @@ fn clone_flake(flake: &str, assume_yes: bool) -> Result<PathBuf, String> {
 ///
 /// Runs after the password seeding and the network carry-over, so what comes
 /// out of the backup wins over what the installer invented a minute ago.
-fn offer_restore(guided: bool, assume_yes: bool) -> Result<(), String> {
+fn offer_restore(guided: bool, assume_yes: bool) -> Result<bool, String> {
     if !guided || assume_yes {
-        return Ok(());
+        return Ok(false);
     }
     if !insist("\nRestore this machine from a backup? [y/n] ")? {
         println!("\n    skipping the restore. To do it later, from the installer or");
         println!("    the booted machine:  sudo kiwami snapshot restore --identity");
-        return Ok(());
+        return Ok(false);
     }
 
     let dest = PathBuf::from("/tmp/kiwami-backup.env");
@@ -1700,7 +1717,7 @@ fn offer_restore(guided: bool, assume_yes: bool) -> Result<(), String> {
             Some(p) => p,
             None => {
                 println!("    skipped - nothing arrived");
-                return Ok(());
+                return Ok(false);
             }
         }
     };
@@ -1723,7 +1740,7 @@ fn offer_restore(guided: bool, assume_yes: bool) -> Result<(), String> {
     crate::snapshot::restore_with(&cred.to_string_lossy(), "/mnt", true)?;
     println!("    wifi, keys, tailnet and tokens are back");
     println!("    the rest follows after boot: sudo kiwami snapshot restore");
-    Ok(())
+    Ok(true)
 }
 
 /// A yes/no question that will not accept a shrug.
@@ -2307,9 +2324,20 @@ fn live_partuuids() -> std::collections::HashSet<String> {
 /// fixing.
 ///
 /// Both are credentials, so both are copied with their permissions intact.
-fn carry_network_state() -> Result<(), String> {
-    // NetworkManager profiles: your own wifi passwords, mode 0600, exactly as
-    // NetworkManager already stores them.
+fn carry_network_state(restored: bool) -> Result<(), String> {
+    // Wifi: the installer's profiles win.
+    //
+    // Both this and the restore write here, and for a while the restore went
+    // last, which meant a network joined during the install was overwritten by
+    // whatever the backup remembered about that SSID. Usually identical, so
+    // nothing looked wrong - but the case where they differ is exactly the
+    // case that matters: you retyped the password during the install because
+    // the stored one had stopped working, and the reboot silently put the
+    // broken one back.
+    //
+    // A profile that just carried this install is a profile proven to work on
+    // this hardware, minutes ago. It outranks a remembered one. Profiles for
+    // other networks are untouched, so the restore's list survives alongside.
     let profiles = Path::new("/etc/NetworkManager/system-connections");
     let saved: Vec<_> = fs::read_dir(profiles)
         .map(|d| d.filter_map(|e| e.ok()).map(|e| e.path()).collect())
@@ -2324,13 +2352,24 @@ fn carry_network_state() -> Result<(), String> {
         println!("    {} wifi network(s) carried over", saved.len());
     }
 
-    // The tailnet node identity. Carrying it means the installed machine comes
-    // back as the same node rather than needing a fresh browser login - which
-    // also means remote access survives the reboot, so it is said out loud
-    // rather than done quietly.
+    // Tailnet identity: the restore wins.
+    //
+    // The opposite rule, and for the opposite reason. The installer's node was
+    // registered minutes ago to let somebody help with the install; the backed
+    // up one is the machine's long-lived identity - the node in your ACLs, the
+    // name that already resolves, the machine your other machines trust.
+    // Overwriting it would strand that node and register yet another, and the
+    // tailnet would collect an xps-2, an xps-3, one per reinstall.
+    //
+    // Nothing is lost by yielding: the installer's session runs off its own
+    // tmpfs and stays up until the reboot regardless of what is written here.
     let state = Path::new("/var/lib/tailscale/tailscaled.state");
+    let dest = target_state_path("var/lib/tailscale");
+    if restored && dest.join("tailscaled.state").exists() {
+        println!("    tailnet identity kept from the backup - it comes back as the same node");
+        return Ok(());
+    }
     if state.exists() {
-        let dest = target_state_path("var/lib/tailscale");
         let dest = dest.as_path();
         fs::create_dir_all(dest).map_err(|e| e.to_string())?;
         run("cp", &["-a", &state.to_string_lossy(), &dest.to_string_lossy()])?;
