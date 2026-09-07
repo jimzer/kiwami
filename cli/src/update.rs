@@ -18,7 +18,44 @@
 use std::fs;
 use std::process::Command;
 
-const FLAKE: &str = "github:jimzer/kiwami";
+/// Where this machine's configuration lives, and what it is called there -
+/// written by Nix at build time from `kiwami.flake` and `kiwami.host`.
+///
+/// This used to be a constant pointing at the author's repository. That works
+/// for exactly one person: anybody else's machine would have rebuilt itself
+/// from somebody else's configuration, or - more likely - failed to find a
+/// host by its name and stopped, with an error naming a repository they have
+/// never heard of.
+const ORIGIN: &str = "/etc/kiwami/origin.json";
+
+struct Origin {
+    flake: String,
+    host: String,
+}
+
+fn origin() -> Result<Origin, String> {
+    let raw = fs::read_to_string(ORIGIN)
+        .map_err(|e| format!("cannot read {ORIGIN}: {e}\nThis system was not built by Kiwami."))?;
+    let v: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("{ORIGIN}: {e}"))?;
+    let flake = v.get("flake").and_then(|f| f.as_str()).unwrap_or("").to_string();
+    let host = v.get("host").and_then(|h| h.as_str()).unwrap_or("").to_string();
+
+    // Said here rather than after a failed build, because the fix is one line
+    // in the machine's own configuration and the error should name it.
+    if flake.is_empty() {
+        return Err(format!(
+            "this machine does not say where its configuration lives.\n\n\
+             Set it in the host's configuration and rebuild once:\n\n  \
+             kiwami.flake = \"github:you/your-config\";\n\n\
+             After that `kiwami update` builds from there."
+        ));
+    }
+    if host.is_empty() {
+        return Err("this machine has no host name to build".into());
+    }
+    Ok(Origin { flake, host })
+}
 
 /// Where the commit this system was built from is recorded. Under
 /// /var/lib/kiwami because that path is persisted, so the answer survives the
@@ -30,7 +67,7 @@ pub fn run(commit: Option<String>, dry: bool) -> Result<(), String> {
         return Err("must run as root (try: sudo kiwami update)".into());
     }
 
-    let host = hostname()?;
+    let Origin { flake: base, host } = origin()?;
 
     // Resolved to a commit before anything is built.
     //
@@ -39,14 +76,14 @@ pub fn run(commit: Option<String>, dry: bool) -> Result<(), String> {
     // apart get the same system instead of whatever main happened to be.
     let rev = match commit {
         Some(c) => c,
-        None => resolve_head()?,
+        None => resolve_head(&base)?,
     };
-    let flake = format!("{FLAKE}/{rev}");
+    let flake = format!("{base}/{rev}");
 
     println!("==> {host} from {rev}");
     if !host_exists(&flake, &host)? {
         return Err(format!(
-            "{FLAKE} does not describe a machine called {host}.\n\
+            "{base} does not describe a machine called {host}.\n\
              Its configuration has not been pushed yet:\n\n  \
              sudo kiwami host push\n\n\
              A machine whose config is not in the flake cannot be rebuilt from it."
@@ -84,14 +121,14 @@ pub fn run(commit: Option<String>, dry: bool) -> Result<(), String> {
 /// --refresh because github: flakes are cached for an hour by default, which
 /// twice today served a commit older than the fix being tested. Baked in here
 /// so it can never be the explanation for "but I pushed that".
-fn resolve_head() -> Result<String, String> {
+fn resolve_head(base: &str) -> Result<String, String> {
     let out = Command::new("nix")
         .args([
             "--extra-experimental-features",
             "nix-command flakes",
             "flake",
             "metadata",
-            FLAKE,
+            base,
             "--refresh",
             "--json",
         ])
@@ -99,7 +136,7 @@ fn resolve_head() -> Result<String, String> {
         .map_err(|e| format!("nix flake metadata: {e}"))?;
     if !out.status.success() {
         return Err(format!(
-            "cannot reach {FLAKE}: {}",
+            "cannot reach {base}: {}",
             String::from_utf8_lossy(&out.stderr).trim()
         ));
     }
@@ -134,17 +171,6 @@ fn host_exists(flake: &str, host: &str) -> Result<bool, String> {
     Ok(names.iter().any(|n| n == host))
 }
 
-/// What this machine calls itself, which is also the host it builds.
-///
-/// Not a flag: a flag is a way to build another machine's configuration onto
-/// this one, and there is no good reason to want that.
-fn hostname() -> Result<String, String> {
-    fs::read_to_string("/etc/hostname")
-        .map(|s| s.trim().to_string())
-        .map_err(|e| format!("cannot read /etc/hostname: {e}"))
-        .and_then(|h| if h.is_empty() { Err("empty hostname".into()) } else { Ok(h) })
-}
-
 /// Build an installer image carrying this machine's whole system.
 ///
 /// Boot it and the install needs no network: `nixos-install --system` copies a
@@ -155,13 +181,12 @@ fn hostname() -> Result<String, String> {
 /// `kiwami update` exists: an incantation you have to look up is one you get
 /// wrong at the moment you are least able to afford it.
 pub fn image(host: Option<String>, out: String) -> Result<(), String> {
-    let host = match host {
-        Some(h) => h,
-        None => hostname()?,
-    };
-    let rev = resolve_head()?;
+    let o = origin()?;
+    let host = host.unwrap_or(o.host);
+    let rev = resolve_head(&o.flake)?;
     let attr = format!(
-        "{FLAKE}/{rev}#nixosConfigurations.installer-{host}.config.system.build.isoImage"
+        "{}/{rev}#nixosConfigurations.installer-{host}.config.system.build.isoImage",
+        o.flake
     );
 
     println!("==> building an installer for {host} from {rev}");

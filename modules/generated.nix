@@ -65,6 +65,14 @@ in
       user = cfg.user;
       userDirectories = cfg.persist.userDirectories;
     };
+    # Where this machine came from, for `kiwami update`. Written by Nix
+    # because it is a fact about how the system was built, and the only place
+    # that knows it is the build.
+    "kiwami/origin.json".text = builtins.toJSON {
+      flake = cfg.flake;
+      host = if cfg.host == "" then config.networking.hostName else cfg.host;
+    };
+
     "kiwami/shell".source = ../shell;
 
     # Ours, a real Ghostty file rather than generated - same treatment as the

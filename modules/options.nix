@@ -53,6 +53,38 @@ in
       };
     };
 
+    flake = mkOption {
+      type = types.str;
+      default = "";
+      example = "github:alice/dotfiles";
+      description = ''
+        The flake this machine rebuilds itself from. `kiwami update` builds
+        `<flake>#nixosConfigurations.<host>` and switches to it.
+
+        The machine deliberately keeps no checkout, so this is how it knows
+        where its own configuration lives. It was a constant in the CLI
+        pointing at the author's repository, which worked for exactly one
+        person: anyone else's machine would have updated itself into somebody
+        else's configuration, or more likely failed to find a host by its
+        name and stopped.
+
+        Left empty, `kiwami update` explains that it has nowhere to build
+        from rather than guessing.
+      '';
+    };
+
+    host = mkOption {
+      type = types.str;
+      default = "";
+      example = "thinkpad";
+      description = ''
+        Which attribute of `kiwami.flake` describes this machine. Empty means
+        `networking.hostName`, which is nearly always right - set it only when
+        the flake calls the machine something other than what the machine
+        calls itself.
+      '';
+    };
+
     user = mkOption {
       type = types.strMatching "[a-z_][a-z0-9_-]*";
       default = "nixos";

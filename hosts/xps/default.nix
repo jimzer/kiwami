@@ -17,6 +17,7 @@
     ./disk.nix
   ];
 
+  kiwami.flake = "github:jimzer/kiwami";
   networking.hostName = "xps";
 
   # The account the desktop belongs to. greetd logs this user in and its home

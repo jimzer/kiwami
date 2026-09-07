@@ -435,7 +435,7 @@ pub fn run_install(opts: Options) -> Result<(), String> {
         // formatted from - and a half-written host would break evaluation of
         // every other machine in the flake.
         if !host_dir.join("default.nix").exists() {
-            scaffold_host(&host_dir, &host.name)?;
+            scaffold_host(&host_dir, &host.name, &flake)?;
         }
         // Only when there is nothing to lose. --relayout runs this same branch
         // for a host that already exists, and writing the placeholder there
@@ -518,7 +518,7 @@ pub fn run_install(opts: Options) -> Result<(), String> {
 
         if host.create && !host_dir.join("default.nix").exists() {
             println!("==> scaffolding hosts/{}", host.name);
-            scaffold_host(&host_dir, &host.name)?;
+            scaffold_host(&host_dir, &host.name, &flake)?;
         }
 
         // A committed hardware.nix may have been tuned by hand; replacing it
@@ -895,7 +895,7 @@ fn generate_hardware(host_dir: &Path) -> Result<(), String> {
 }
 
 /// The choices half of a machine: the things no probe can answer.
-fn scaffold_host(host_dir: &Path, name: &str) -> Result<(), String> {
+fn scaffold_host(host_dir: &Path, name: &str, flake: &str) -> Result<(), String> {
     let body = format!(
         r#"# {name}
 #
@@ -917,6 +917,14 @@ fn scaffold_host(host_dir: &Path, name: &str) -> Result<(), String> {
   ];
 
   networking.hostName = "{name}";
+
+  # Where this machine rebuilds itself from. It keeps no checkout, so without
+  # this `kiwami update` has nowhere to build and says so.
+  #
+  # It is the flake this machine was installed from, which is very likely the
+  # one you want. Point it at your own configuration repository if you keep
+  # your hosts somewhere other than where Kiwami itself lives.
+  kiwami.flake = "{flake}";
 
   # The account the desktop belongs to. greetd logs this user in and its home
   # carries the Hyprland and Quickshell config, so a mismatch here is quiet
@@ -958,6 +966,7 @@ fn scaffold_host(host_dir: &Path, name: &str) -> Result<(), String> {
 "#,
         name = name,
         user = "kiwami",
+        flake = flake,
     );
     fs::create_dir_all(host_dir).map_err(|e| e.to_string())?;
     fs::write(host_dir.join("default.nix"), body).map_err(|e| e.to_string())

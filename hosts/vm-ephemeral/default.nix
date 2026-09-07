@@ -35,6 +35,7 @@
   # The point of this host.
   kiwami.ephemeralRoot = true;
 
+  kiwami.flake = "github:jimzer/kiwami";
   networking.hostName = "kiwami-ephemeral";
 
   boot.loader.systemd-boot.enable = true;

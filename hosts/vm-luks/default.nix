@@ -32,6 +32,7 @@
   # supported mode - converting these is follow-up work.
   kiwami.ephemeralRoot = false;
 
+  kiwami.flake = "github:jimzer/kiwami";
   networking.hostName = "kiwami-luks";
 
   boot.loader.systemd-boot.enable = true;
